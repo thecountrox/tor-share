@@ -20,5 +20,8 @@ I will try to update it as the project reaches closer to completion and hopefull
 
 ### Screenshots
 
+Tor Share Electron UI
 <img src="./screenshots/Electron-UI.png" width="400" height="300" />
+
+Tor status monitoring
 <img src="./screenshots/Tor-state-console.png" width="400" height="300" />
