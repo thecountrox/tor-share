@@ -3,11 +3,12 @@ const { app, BrowserWindow, ipcMain } = require("electron");
 const path = require("node:path");
 const { spawn, execSync } = require("child_process");
 const fs = require("fs-extra");
-
+const axios = require("axios");
 // Declarations
 let torProcess;
 let torDataDir;
 let torStatus = "not started"; // Values : 'not started', 'starting', 'started'
+let axiosInstance = null;
 
 // Handle creating/removing shortcuts on Windows when installing/uninstalling.
 if (require("electron-squirrel-startup")) {
@@ -110,7 +111,7 @@ function stopTor() {
   }
 }
 
-function statusTor() {
+ipcMain.handle("statusTor", (event) => {
   switch (torStatus) {
     case "not started":
       console.log("[INFO] ✗ Tor not started");
@@ -122,6 +123,31 @@ function statusTor() {
       console.log("[INFO] ✓ Tor started successfully!");
       return torStatus;
   }
+});
+
+function connectTor() {
+  axiosInstance = axios.create({
+    proxy: {
+      host: "127.0.0.1",
+      port: 9050,
+      protocol: "socks5",
+    },
+  });
+}
+
+function getRequest(url) {
+  if (axiosInstance == null) {
+    connectTor();
+  }
+  console.log("from function: ", url);
+  axiosInstance
+    .get(url)
+    .then((response) => {
+      console.log("[INFO]", response.data);
+    })
+    .catch((error) => {
+      console.error(error);
+    });
 }
 
 app.whenReady().then(() => {
@@ -132,7 +158,8 @@ app.whenReady().then(() => {
 
   ipcMain.handle("startTor", startTor);
   ipcMain.handle("stopTor", stopTor);
-  ipcMain.handle("statusTor", statusTor);
+  ipcMain.handle("connectTor", connectTor);
+  ipcMain.handle("getRequest", getRequest);
 
   // On OS X it's common to re-create a window in the app when the
   // dock icon is clicked and there are no other windows open.

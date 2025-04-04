@@ -8,4 +8,6 @@ contextBridge.exposeInMainWorld("electron", {
   startTor: () => ipcRenderer.invoke("startTor"),
   stopTor: () => ipcRenderer.invoke("stopTor"),
   statusTor: () => ipcRenderer.invoke("statusTor"),
+  connectTor: () => ipcRenderer.invoke("connectTor"),
+  getRequest: (url) => ipcRenderer.invoke("getRequest", url),
 });
