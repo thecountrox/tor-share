@@ -1,8 +1,10 @@
+// Imports
 const { app, BrowserWindow, ipcMain } = require("electron");
 const path = require("node:path");
 const { spawn, execSync } = require("child_process");
 const fs = require("fs-extra");
 
+// Declarations
 let torProcess;
 let torDataDir;
 let torStatus = "not started"; // Values : 'not started', 'starting', 'started'
@@ -121,6 +123,7 @@ function statusTor() {
       return torStatus;
   }
 }
+
 app.whenReady().then(() => {
   // This method will be called when Electron has finished
   // initialization and is ready to create browser windows.

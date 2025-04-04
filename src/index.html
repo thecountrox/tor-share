@@ -1,70 +1,75 @@
 <!doctype html>
 <html>
-  <head>
-    <meta charset="UTF-8" />
-    <title>Hello World!</title>
-    <link rel="stylesheet" href="index.css" />
-  </head>
 
-  <body>
-    <h1>💖 Hello World!</h1>
-    <p>Welcome to your Electron application.</p>
-    <p>
-      Current Status: <span id="status" class="not-started">Not Started</span>
-    </p>
-    <button id="btn-stop">Stop Tor</button>
-    <button id="btn-start">Start Tor</button>
-    <script>
-      const stopBtn = document.getElementById("btn-stop");
-      const startBtn = document.getElementById("btn-start");
-      const statusElm = document.getElementById("status");
+<head>
+  <meta charset="UTF-8" />
+  <title>Hello World!</title>
+  <link rel="stylesheet" href="index.css" />
+</head>
 
-      function updateStatus(status) {
-        statusElm.textContent =
-          status.charAt(0).toUpperCase() + status.slice(1);
-        statusElm.className = status;
+<body>
+  <h1>Tor Share</h1>
+  <p>
+    This is a dev version of Tor Share and not indicative of the final
+    product.
+  </p>
+  <p>
+    Current Status: <span id="status" class="not-started">Not Started</span>
+  </p>
+  <button id="btn-stop">Stop Tor</button>
+  <button id="btn-start">Start Tor</button>
+  <script>
+    const stopBtn = document.getElementById("btn-stop");
+    const startBtn = document.getElementById("btn-start");
+    const statusElm = document.getElementById("status");
+
+    function updateStatus(status) {
+      statusElm.textContent =
+        status.charAt(0).toUpperCase() + status.slice(1);
+      statusElm.className = status;
+    }
+    switch (status) {
+      case "not started":
+        startBtn.disabled = false;
+        stopBtn.disabled = true;
+
+      case "starting":
+        startBtn.disabled = true;
+        stopBtn.disabled = false;
+
+      case "started":
+        startBtn.disabled = true;
+        stopBtn.disabled = false;
+    }
+
+    async function fetchStatus() {
+      const status = await window.electron.statusTor();
+      updateStatus(status);
+    }
+
+    function startPolling() {
+      polling = setInterval(fetchStatus, 5000);
+    }
+
+    function stopPolling() {
+      if (polling) {
+        clearInterval(polling);
       }
-      switch (status) {
-        case "not started":
-          startBtn.disabled = false;
-          stopBtn.disabled = true;
+    }
 
-        case "starting":
-          startBtn.disabled = true;
-          stopBtn.disabled = false;
-
-        case "started":
-          startBtn.disabled = true;
-          stopBtn.disabled = false;
-      }
-
-      async function fetchStatus() {
-        const status = await window.electron.statusTor();
-        updateStatus(status);
-      }
-
-      function startPolling() {
-        polling = setInterval(fetchStatus, 5000);
-      }
-
-      function stopPolling() {
-        if (polling) {
-          clearInterval(polling);
-        }
-      }
-
-      stopBtn.addEventListener("click", async () => {
-        const response = await window.electron.stopTor();
-        fetchStatus();
-      });
-
-      startBtn.addEventListener("click", async () => {
-        const response = await window.electron.startTor();
-        fetchStatus();
-      });
-
-      startPolling();
+    stopBtn.addEventListener("click", async () => {
+      const response = await window.electron.stopTor();
       fetchStatus();
-    </script>
-  </body>
+    });
+
+    startBtn.addEventListener("click", async () => {
+      const response = await window.electron.startTor();
+      fetchStatus();
+    });
+
+    startPolling();
+    fetchStatus();
+  </script>
+</body>
+
 </html>
