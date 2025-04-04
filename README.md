@@ -20,5 +20,5 @@ I will try to update it as the project reaches closer to completion and hopefull
 
 ### Screenshots
 
-![Tor Share UI](screenshots/Electron-UI.png)
-![Tor Share UI](screenshots/Tor-state-console.png)
+<img src="./screenshots/Electron-UI.png" width="400" height="200" />
+<img src="./screenshots/Tor-state-console.png" width="400" height="200" />
