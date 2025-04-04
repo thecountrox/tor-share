@@ -1,10 +1,11 @@
-const { app, BrowserWindow } = require("electron");
+const { app, BrowserWindow, ipcMain } = require("electron");
 const path = require("node:path");
 const { spawn, execSync } = require("child_process");
 const fs = require("fs-extra");
 
 let torProcess;
 let torDataDir;
+let torStatus = "not started"; // Values : 'not started', 'starting', 'started'
 
 // Handle creating/removing shortcuts on Windows when installing/uninstalling.
 if (require("electron-squirrel-startup")) {
@@ -18,6 +19,8 @@ const createWindow = () => {
     height: 600,
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
+      nodeIntegration: true,
+      contextIsolation: true,
     },
   });
 
@@ -44,50 +47,89 @@ function getTorPath() {
 }
 
 function startTor() {
-  torDataDir = fs.mkdtempSync(path.join(app.getPath("temp"), "tor-")); // create a temp dir for torrc
+  if (torProcess && !torProcess.killed) {
+    console.log("[INFO] Tor has already started");
+  } else {
+    torDataDir = fs.mkdtempSync(path.join(app.getPath("temp"), "tor-")); // create a temp dir for torrc
 
-  // Create minimal torrc file
-  const torrcPath = path.join(torDataDir, "torrc"); // append torrc to temp dir
-  fs.writeFileSync(
-    torrcPath,
-    `
+    // Create minimal torrc file
+    const torrcPath = path.join(torDataDir, "torrc"); // append torrc to temp dir
+    fs.writeFileSync(
+      torrcPath,
+      `
       SocksPort 9050
       DataDirectory ${torDataDir}
       ControlPort 9051
       HashedControlPassword 16:872860B76453A77D60CA2BB8C1A7042072093276A3D701AD684053EC4C
     `,
-  );
+    );
+    torProcess = spawn(getTorPath(), [
+      "-f",
+      torrcPath, // Use config file instead
+    ]);
+    torStatus = "starting";
+  }
 
-  torProcess = spawn(getTorPath(), [
-    "-f",
-    torrcPath, // Use config file instead
-  ]);
+  torProcess.stdout.on("data", (data) => {
+    const output = data.toString();
+    console.log(output); // Log Tor's stdout to the console
 
-  torProcess.stdout.pipe(process.stdout); //pipes output to console so u can actually see it
+    if (output.includes("Bootstrapped 100% (done): Done")) {
+      console.log("[INFO] Tor has started successfully.");
+      torStatus = "started";
+    }
+  });
+
+  torProcess.stderr.on("data", (data) => {
+    console.error("[ERROR] Tor stderr:", data.toString());
+  });
+
+  torProcess.on("close", (code) => {
+    console.log(`[INFO] Tor process exited with code ${code}`);
+  });
 }
 
 function stopTor() {
-  if (torProcess) {
-      try {
-        execSync(
-          `${getTorPath()} --controlport 9051 --hash-password 16:872860B76453A77D60CA2BB8C1A7042072093276A3D701AD684053EC4C --signal halt`,
-        );
-      } catch (error) {
-        console.error("Error stopping Tor gracefully:", error);
-        torProcess.kill();
-      }
+  if (!torProcess || torProcess.killed) {
+    console.log("[INFO] No Tor Process");
+  } else {
+    try {
+      execSync(
+        `${getTorPath()} --controlport 9051 --hash-password 16:872860B76453A77D60CA2BB8C1A7042072093276A3D701AD684053EC4C --signal halt`,
+      );
+      torProcess = null; //deinit the object that holds tor process info
+      torStatus = "not started";
+    } catch (error) {
+      console.error("[ERR] Error stopping Tor gracefully:", error);
+      torProcess.kill();
+      torProcess = null;
+      torStatus = "not started";
     }
-  else{
-    console.log('[INFO] No Tor Process');
   }
 }
 
-// This method will be called when Electron has finished
-// initialization and is ready to create browser windows.
-// Some APIs can only be used after this event occurs.
+function statusTor() {
+  switch (torStatus) {
+    case "not started":
+      console.log("[INFO] ✗ Tor not started");
+      return torStatus;
+    case "starting":
+      console.log("[INFO] ⏲ Tor process is starting...");
+      return torStatus;
+    case "started":
+      console.log("[INFO] ✓ Tor started successfully!");
+      return torStatus;
+  }
+}
 app.whenReady().then(() => {
+  // This method will be called when Electron has finished
+  // initialization and is ready to create browser windows.
   startTor();
   createWindow();
+
+  ipcMain.handle("startTor", startTor);
+  ipcMain.handle("stopTor", stopTor);
+  ipcMain.handle("statusTor", statusTor);
 
   // On OS X it's common to re-create a window in the app when the
   // dock icon is clicked and there are no other windows open.
@@ -98,15 +140,15 @@ app.whenReady().then(() => {
   });
 });
 
-// Quit when all windows are closed, except on macOS. There, it's common
-// for applications and their menu bar to stay active until the user quits
-// explicitly with Cmd + Q.
 app.on("window-all-closed", () => {
+  // Quit when all windows are closed, except on macOS. There, it's common
+  // for applications and their menu bar to stay active until the user quits
+  // explicitly with Cmd + Q.
   if (process.platform !== "darwin") {
-    stopTor();
     app.quit();
   }
 });
 
-// In this file you can include the rest of your app's specific main process
-// code. You can also put them in separate files and import them here.
+app.on("quit", () => {
+  stopTor();
+});
