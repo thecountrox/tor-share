@@ -24,7 +24,6 @@ const createWindow = () => {
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       nodeIntegration: true,
-      contextIsolation: false,
     },
   });
 
@@ -112,7 +111,7 @@ function stopTor() {
   }
 }
 
-ipcMain.handle("statusTor", (event) => {
+ipcMain.handle("statusTor", () => {
   switch (torStatus) {
     case "not started":
       console.log("[INFO] ✗ Tor not started");
@@ -127,18 +126,18 @@ ipcMain.handle("statusTor", (event) => {
 });
 
 function connectTor() {
-  const proxyUrl = "socks5://127.0.0.1:9050"; 
-  const agent = new SocksProxyAgent(proxyUrl); 
+  const proxyUrl = "socks5://127.0.0.1:9050";
+  const agent = new SocksProxyAgent(proxyUrl);
 
   axiosInstance = axios.create({
-    httpAgent: agent, 
-    httpsAgent: agent, 
+    httpAgent: agent,
+    httpsAgent: agent,
   });
 
   console.log("[INFO] Axios instance configured with SOCKS5 proxy:", proxyUrl);
 }
 
-ipcMain.handle("getRequest", async (event, url) => {
+ipcMain.handle("getRequest", async (url) => {
   if (!url || typeof url !== "string") {
     console.error("[ERROR] Invalid URL:", url);
     throw new Error("Invalid URL");
@@ -152,10 +151,10 @@ ipcMain.handle("getRequest", async (event, url) => {
     console.log("[INFO] Sending GET request to:", url);
     const response = await axiosInstance.get(url);
     console.log("[INFO] Response received:", response.data);
-    return response.data; 
+    return response.data;
   } catch (error) {
     console.error("[ERROR] Request failed:", error.message);
-    throw error; 
+    throw error;
   }
 });
 
