@@ -40,14 +40,20 @@
         case "not started":
           startBtn.disabled = false;
           stopBtn.disabled = true;
+          submitBtn.disabled = true;
+          break;
 
         case "starting":
           startBtn.disabled = true;
           stopBtn.disabled = false;
+          submitBtn.disabled = true;
+          break;
 
         case "started":
           startBtn.disabled = true;
           stopBtn.disabled = false;
+          submitBtn.disabled = false;
+          break;
       }
     }
 

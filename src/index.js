@@ -3,8 +3,7 @@ const { app, BrowserWindow, ipcMain } = require("electron");
 const path = require("node:path");
 const { spawn, execSync } = require("child_process");
 const fs = require("fs-extra");
-const axios = require("axios");
-const { SocksProxyAgent } = require("socks-proxy-agent");
+const tor_axios = require("tor-axios");
 
 // Declarations
 let torProcess;
@@ -127,14 +126,10 @@ ipcMain.handle("statusTor", (event) => {
 });
 
 function connectTor() {
-  const proxyUrl = "socks5://127.0.0.1:9050";
-  const agent = new SocksProxyAgent(proxyUrl);
-
-  axiosInstance = axios.create({
-    httpAgent: agent,
-    httpsAgent: agent,
+  axiosInstance = tor_axios.torSetup({
+    ip: "localhost",
+    port: 9050,
   });
-
   console.log("[INFO] Axios instance configured with SOCKS5 proxy:", proxyUrl);
 }
 

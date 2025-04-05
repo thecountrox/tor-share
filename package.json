@@ -18,10 +18,9 @@
   },
   "license": "MIT",
   "dependencies": {
-    "axios": "^1.8.4",
     "electron-squirrel-startup": "^1.0.1",
     "fs-extra": "^11.3.0",
-    "socks-proxy-agent": "^8.0.5"
+    "tor-axios": "^1.0.11"
   },
   "devDependencies": {
     "@electron-forge/cli": "^7.8.0",
