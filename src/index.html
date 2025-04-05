@@ -57,26 +57,7 @@
     }
 
     submitBtn.addEventListener("click", async () => {
-      url = urlElm.value;
-      if (url != "") {
-        console.log("from html:", url);
-        const response = await window.electron.getRequest(url);
-      }
-    });
-
-    stopBtn.addEventListener("click", async () => {
-      const response = await window.electron.stopTor();
-      fetchStatus();
-    });
-
-    startBtn.addEventListener("click", async () => {
-      const response = await window.electron.startTor();
-      fetchStatus();
-    });
-
-    fetchStatus();
-    setInterval(fetchStatus, 5000);
-  </script>
-</body>
-
-</html>
+      const url = urlElm.value.trim(); // Get the value from the input box and trim whitespace
+      if (url) {
+        try {
+          console.log("[INFO] Sending

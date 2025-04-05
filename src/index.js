@@ -4,6 +4,7 @@ const path = require("node:path");
 const { spawn, execSync } = require("child_process");
 const fs = require("fs-extra");
 const axios = require("axios");
+const { SocksProxyAgent } = require("socks-proxy-agent"); // Updated import
 // Declarations
 let torProcess;
 let torDataDir;
@@ -126,29 +127,37 @@ ipcMain.handle("statusTor", (event) => {
 });
 
 function connectTor() {
+  const proxyUrl = "socks5://127.0.0.1:9050"; 
+  const agent = new SocksProxyAgent(proxyUrl); 
+
   axiosInstance = axios.create({
-    proxy: {
-      host: "127.0.0.1",
-      port: 9050,
-      protocol: "socks5",
-    },
+    httpAgent: agent, 
+    httpsAgent: agent, 
   });
+
+  console.log("[INFO] Axios instance configured with SOCKS5 proxy:", proxyUrl);
 }
 
-function getRequest(url) {
-  if (axiosInstance == null) {
+ipcMain.handle("getRequest", async (event, url) => {
+  if (!url || typeof url !== "string") {
+    console.error("[ERROR] Invalid URL:", url);
+    throw new Error("Invalid URL");
+  }
+
+  if (!axiosInstance) {
     connectTor();
   }
-  console.log("from function: ", url);
-  axiosInstance
-    .get(url)
-    .then((response) => {
-      console.log("[INFO]", response.data);
-    })
-    .catch((error) => {
-      console.error(error);
-    });
-}
+
+  try {
+    console.log("[INFO] Sending GET request to:", url);
+    const response = await axiosInstance.get(url);
+    console.log("[INFO] Response received:", response.data);
+    return response.data; 
+  } catch (error) {
+    console.error("[ERROR] Request failed:", error.message);
+    throw error; 
+  }
+});
 
 app.whenReady().then(() => {
   // This method will be called when Electron has finished
@@ -159,7 +168,6 @@ app.whenReady().then(() => {
   ipcMain.handle("startTor", startTor);
   ipcMain.handle("stopTor", stopTor);
   ipcMain.handle("connectTor", connectTor);
-  ipcMain.handle("getRequest", getRequest);
 
   // On OS X it's common to re-create a window in the app when the
   // dock icon is clicked and there are no other windows open.
