@@ -36,8 +36,10 @@ const createWindow = () => {
 
 function getTorPath() {
   const platform = process.platform;
+  console.log(fs.readdirSync(app.getAppPath() + "/resources/tor/linux"));
   const torPath = path.join(
-    "/home/thecount/basement/tor-real/resources/",
+    app.getAppPath(),
+    "resources",
     "tor",
     platform === "win32"
       ? "win32/tor.exe"
