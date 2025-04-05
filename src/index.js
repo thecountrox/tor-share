@@ -4,7 +4,8 @@ const path = require("node:path");
 const { spawn, execSync } = require("child_process");
 const fs = require("fs-extra");
 const axios = require("axios");
-const { SocksProxyAgent } = require("socks-proxy-agent"); // Updated import
+const { SocksProxyAgent } = require("socks-proxy-agent");
+
 // Declarations
 let torProcess;
 let torDataDir;
@@ -111,7 +112,7 @@ function stopTor() {
   }
 }
 
-ipcMain.handle("statusTor", () => {
+ipcMain.handle("statusTor", (event) => {
   switch (torStatus) {
     case "not started":
       console.log("[INFO] ✗ Tor not started");
@@ -137,7 +138,7 @@ function connectTor() {
   console.log("[INFO] Axios instance configured with SOCKS5 proxy:", proxyUrl);
 }
 
-ipcMain.handle("getRequest", async (url) => {
+ipcMain.handle("getRequest", async (event, url) => {
   if (!url || typeof url !== "string") {
     console.error("[ERROR] Invalid URL:", url);
     throw new Error("Invalid URL");
