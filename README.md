@@ -22,7 +22,7 @@ I will try to update it as the project reaches closer to completion and hopefull
 
 Tor Share Electron UI
 <br>
-<img src="./screenshots/Electron-UI.png" width="400" height="300" />
+<img src="https://github.com/user-attachments/assets/85464c8f-f977-4f5f-b1d9-e55220d08a92" />
 <br>
 <br>
 Tor status monitoring
