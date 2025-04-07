@@ -65,6 +65,11 @@ const initializeApp = async () => {
     p2pManager.on("transfer-complete", (data) => {
       mainWindow?.webContents.send("transfer-complete", data);
     });
+
+    p2pManager.on('error', (error) => {
+      console.error('P2P error:', error);
+      mainWindow?.webContents.send('transfer-error', error.message);
+    });
   } catch (error) {
     console.error("Failed to initialize app:", error);
     mainWindow?.webContents.send("tor-status", "error");

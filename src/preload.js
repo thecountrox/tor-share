@@ -43,4 +43,12 @@ contextBridge.exposeInMainWorld("electron", {
     return () => ipcRenderer.removeAllListeners("transfer-complete");
   },
   refreshPeers: () => ipcRenderer.invoke("refresh-peers"),
+  onFileReceiveStart: (callback) => {
+    ipcRenderer.on("file-receive-start", (_, data) => callback(data));
+    return () => ipcRenderer.removeAllListeners("file-receive-start");
+  },
+  onTransferError: (callback) => {
+    ipcRenderer.on("transfer-error", (_, error) => callback(error));
+    return () => ipcRenderer.removeAllListeners("transfer-error");
+  }
 });

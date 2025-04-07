@@ -4,6 +4,8 @@ const { io } = require('socket.io-client');
 const { SocksProxyAgent } = require('socks-proxy-agent');
 const path = require('path');
 const fs = require('fs-extra');
+const { app } = require('electron');
+const FileManager = require('./file');
 
 class P2PManager extends EventEmitter {
   constructor() {
@@ -12,6 +14,7 @@ class P2PManager extends EventEmitter {
     this.dataChannels = new Map();
     this.socket = null;
     this.peerId = null;
+    this.fileManager = new FileManager(path.join(app.getPath('downloads'), 'tor-share'));
     this.configuration = {
       iceServers: [
         {
@@ -161,11 +164,13 @@ class P2PManager extends EventEmitter {
     const fileSize = fileStats.size;
     const chunkSize = 16 * 1024; // 16KB chunks
 
-    // Send file metadata
+    // Before sending file
+    const fileHash = await this.fileManager.calculateFileHash(filePath);
     dataChannel.send(JSON.stringify({
       type: 'file-start',
       name: fileName,
-      size: fileSize
+      size: fileSize,
+      hash: fileHash  // Add hash to metadata
     }));
 
     const fileStream = fs.createReadStream(filePath, { highWaterMark: chunkSize });
@@ -196,24 +201,47 @@ class P2PManager extends EventEmitter {
       const data = JSON.parse(message);
       switch (data.type) {
         case 'file-start':
-          this.emit('file-receive-start', {
-            peerId,
-            fileName: data.name,
-            fileSize: data.size
-          });
+          console.log('Starting file receive:', data);
+          this.fileManager.startFileDownload(peerId, data.name, data.size)
+            .then(downloadPath => {
+              console.log('File will be saved to:', downloadPath);
+              this.emit('file-receive-start', {
+                peerId,
+                fileName: data.name,
+                fileSize: data.size,
+                downloadPath
+              });
+            })
+            .catch(error => {
+              console.error('Failed to start file download:', error);
+            });
           break;
         case 'file-end':
-          this.emit('file-receive-complete', { peerId });
+          console.log('Completing file receive');
+          this.fileManager.completeDownload(peerId)
+            .then(filePath => {
+              this.emit('file-receive-complete', { peerId, filePath });
+            })
+            .catch(error => {
+              console.error('Failed to complete file download:', error);
+            });
           break;
         default:
           console.warn('Unknown message type:', data.type);
       }
     } catch (error) {
       // Handle binary data (file chunks)
-      this.emit('file-chunk', {
-        peerId,
-        chunk: message
-      });
+      console.log('Received file chunk from peer:', peerId);
+      this.fileManager.writeChunk(peerId, message)
+        .then(progress => {
+          this.emit('transfer-progress', {
+            peerId,
+            ...progress
+          });
+        })
+        .catch(error => {
+          console.error('Failed to write file chunk:', error);
+        });
     }
   }
 
@@ -235,6 +263,8 @@ class P2PManager extends EventEmitter {
       this.peerConnections.delete(peerId);
     }
     this.dataChannels.delete(peerId);
+    // Clean up any incomplete downloads
+    this.fileManager.cleanupIncompleteDownloads();
   }
 
   disconnect() {
@@ -251,6 +281,21 @@ class P2PManager extends EventEmitter {
     // Cleanup all peer connections
     for (const peerId of this.peerConnections.keys()) {
       this.cleanupPeer(peerId);
+    }
+  }
+
+  async sendChunk(dataChannel, chunk, retries = 3) {
+    for (let i = 0; i < retries; i++) {
+      try {
+        await new Promise((resolve, reject) => {
+          dataChannel.send(chunk);
+          resolve();
+        });
+        return;
+      } catch (error) {
+        if (i === retries - 1) throw error;
+        await new Promise(resolve => setTimeout(resolve, 1000));
+      }
     }
   }
 }
