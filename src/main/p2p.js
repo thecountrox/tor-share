@@ -60,6 +60,13 @@ class P2PManager extends EventEmitter {
       this.cleanupPeer(peerId);
       this.emit('peer-disconnected', peerId);
     });
+
+    // Set up periodic peer discovery
+    this.discoveryInterval = setInterval(() => {
+      if (this.socket && this.socket.connected) {
+        this.socket.emit('discover');
+      }
+    }, 10000); // Refresh every 10 seconds
   }
 
   async createPeerConnection(peerId, initiator = false) {
@@ -231,6 +238,11 @@ class P2PManager extends EventEmitter {
   }
 
   disconnect() {
+    if (this.discoveryInterval) {
+      clearInterval(this.discoveryInterval);
+      this.discoveryInterval = null;
+    }
+    
     if (this.socket) {
       this.socket.disconnect();
       this.socket = null;

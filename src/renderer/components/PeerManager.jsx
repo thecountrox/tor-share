@@ -1,11 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { Box, Button, List, ListItem, ListItemText, Typography, LinearProgress } from '@mui/material';
+import RefreshIcon from '@mui/icons-material/Refresh';
 
 const PeerManager = () => {
   const [selfId, setSelfId] = useState(null);
   const [peers, setPeers] = useState([]);
   const [transfers, setTransfers] = useState({});
   const [selectedFile, setSelectedFile] = useState(null);
+  const [connectedPeers, setConnectedPeers] = useState(new Set());
 
   useEffect(() => {
     // Set up event listeners when component mounts
@@ -21,12 +23,16 @@ const PeerManager = () => {
         }
       }));
     });
+    const removeChannelOpenListener = window.electron.onPeerConnected((peerId) => {
+      setConnectedPeers(prev => new Set([...prev, peerId]));
+    });
 
     // Clean up event listeners when component unmounts
     return () => {
       removeSelfIdListener();
       removePeerListListener();
       removeTransferProgressListener();
+      removeChannelOpenListener();
     };
   }, []);
 
@@ -40,6 +46,21 @@ const PeerManager = () => {
   const handleSendFile = async (peerId) => {
     if (!selectedFile) return;
     try {
+      // First ensure we have a connection
+      if (!connectedPeers.has(peerId)) {
+        await window.electron.connectPeer(peerId);
+        // Wait for the connection to be established
+        await new Promise((resolve) => {
+          const checkConnection = setInterval(() => {
+            if (connectedPeers.has(peerId)) {
+              clearInterval(checkConnection);
+              resolve();
+            }
+          }, 100);
+        });
+      }
+      
+      // Now send the file
       await window.electron.sendFile(peerId, selectedFile.path);
       setTransfers((prev) => ({
         ...prev,
@@ -48,6 +69,10 @@ const PeerManager = () => {
     } catch (error) {
       console.error('Failed to send file:', error);
     }
+  };
+
+  const handleRefresh = () => {
+    window.electron.refreshPeers(); // This will trigger a new discover event
   };
 
   return (
@@ -70,9 +95,16 @@ const PeerManager = () => {
         </Typography>
       )}
 
-      <Typography variant="h6" gutterBottom>
-        Connected Peers
-      </Typography>
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 2 }}>
+        <Typography variant="h6">Connected Peers</Typography>
+        <Button 
+          variant="outlined" 
+          onClick={handleRefresh}
+          startIcon={<RefreshIcon />}
+        >
+          Refresh
+        </Button>
+      </Box>
 
       <List>
         {peers.map((peerId) => (
@@ -80,17 +112,22 @@ const PeerManager = () => {
             <ListItemText
               primary={`Peer ${peerId}`}
               secondary={
-                transfers[peerId] ? (
-                  <Box>
-                    <Typography variant="body2">
-                      {transfers[peerId].status}
-                    </Typography>
-                    <LinearProgress
-                      variant="determinate"
-                      value={transfers[peerId].progress * 100}
-                    />
-                  </Box>
-                ) : null
+                <Box>
+                  <Typography variant="body2">
+                    {connectedPeers.has(peerId) ? 'Connected' : 'Not connected'}
+                  </Typography>
+                  {transfers[peerId] && (
+                    <>
+                      <Typography variant="body2">
+                        {transfers[peerId].status}
+                      </Typography>
+                      <LinearProgress
+                        variant="determinate"
+                        value={transfers[peerId].progress * 100}
+                      />
+                    </>
+                  )}
+                </Box>
               }
             />
             <Button

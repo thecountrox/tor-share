@@ -41,5 +41,6 @@ contextBridge.exposeInMainWorld("electron", {
   onTransferComplete: (callback) => {
     ipcRenderer.on("transfer-complete", (_, data) => callback(data));
     return () => ipcRenderer.removeAllListeners("transfer-complete");
-  }
+  },
+  refreshPeers: () => ipcRenderer.invoke("refresh-peers"),
 });

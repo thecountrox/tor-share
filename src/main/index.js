@@ -143,3 +143,13 @@ ipcMain.handle("select-file", async () => {
 ipcMain.handle("send-file", async (event, peerId, filePath) => {
   await p2pManager.sendFile(peerId, filePath);
 });
+
+ipcMain.handle("refresh-peers", async () => {
+  if (p2pManager && p2pManager.socket) {
+    p2pManager.socket.emit('discover');
+  }
+});
+
+ipcMain.handle("connect-peer", async (event, peerId) => {
+  await p2pManager.initiateConnection(peerId);
+});
