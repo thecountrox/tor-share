@@ -25,6 +25,8 @@ class P2PManager extends EventEmitter {
     // Connect to the signaling server through Tor
     const agent = new SocksProxyAgent('socks5h://127.0.0.1:9050');
     
+    console.log("Connecting to signaling server.....")
+
     this.socket = io(`http://${onionAddress}`, {
       agent,
       transports: ['websocket'],
@@ -33,7 +35,7 @@ class P2PManager extends EventEmitter {
 
     // Handle signaling server events
     this.socket.on('connect', () => {
-      console.log('Connected to signaling server');
+      console.log('Connected to signaling server!');
       this.socket.emit('discover');
     });
 
