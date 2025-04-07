@@ -26,6 +26,10 @@ const PeerManager = () => {
     const removeChannelOpenListener = window.electron.onPeerConnected((peerId) => {
       setConnectedPeers(prev => new Set([...prev, peerId]));
     });
+    const removeTransferErrorListener = window.electron.onTransferError((error) => {
+      console.error('Transfer error:', error);
+      // You could show this in the UI with a snackbar or alert
+    });
 
     // Clean up event listeners when component unmounts
     return () => {
@@ -33,6 +37,7 @@ const PeerManager = () => {
       removePeerListListener();
       removeTransferProgressListener();
       removeChannelOpenListener();
+      removeTransferErrorListener();
     };
   }, []);
 

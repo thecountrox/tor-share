@@ -135,6 +135,7 @@ class P2PManager extends EventEmitter {
 
   setupDataChannel(peerId, dataChannel) {
     console.log('Setting up data channel for peer:', peerId);
+    dataChannel.binaryType = 'arraybuffer';
     this.dataChannels.set(peerId, dataChannel);
 
     dataChannel.onopen = () => {
@@ -148,8 +149,76 @@ class P2PManager extends EventEmitter {
       this.cleanupPeer(peerId);
     };
 
-    dataChannel.onmessage = (event) => {
-      this.handleMessage(peerId, event.data);
+    dataChannel.onmessage = async (event) => {
+      try {
+        if (typeof event.data === 'string') {
+          // Handle JSON messages
+          const data = JSON.parse(event.data);
+          switch (data.type) {
+            case 'file-start':
+              console.log('Starting file receive:', data);
+              try {
+                await this.fileManager.startFileDownload(peerId, data.name, data.size);
+                this.emit('file-receive-start', {
+                  peerId,
+                  fileName: data.name,
+                  fileSize: data.size,
+                });
+              } catch (error) {
+                console.error('Failed to start file download:', error);
+                this.emit('error', {
+                  type: 'file-receive-error',
+                  peerId,
+                  error: error.message
+                });
+                // Notify the sender that we failed to start the download
+                dataChannel.send(JSON.stringify({
+                  type: 'file-error',
+                  error: 'Failed to start download'
+                }));
+              }
+              break;
+            case 'file-end':
+              console.log('Completing file receive');
+              const filePath = await this.fileManager.completeDownload(peerId);
+              this.emit('file-receive-complete', { peerId, filePath });
+              break;
+            default:
+              console.warn('Unknown message type:', data.type);
+          }
+        } else {
+          // Handle binary data
+          try {
+            const chunk = Buffer.from(event.data);
+            const progress = await this.fileManager.writeChunk(peerId, chunk);
+            this.emit('transfer-progress', {
+              peerId,
+              ...progress
+            });
+          } catch (error) {
+            console.error('Error handling file chunk:', error);
+            this.emit('error', {
+              type: 'file-chunk-error',
+              peerId,
+              error: error.message
+            });
+            // Clean up the failed download
+            await this.fileManager.cleanupDownload(peerId);
+            // Notify the sender
+            dataChannel.send(JSON.stringify({
+              type: 'file-error',
+              error: 'Failed to process file chunk'
+            }));
+          }
+        }
+      } catch (error) {
+        console.error('Error in message handler:', error);
+        this.emit('error', {
+          type: 'message-error',
+          peerId,
+          error: error.message
+        });
+      }
     };
   }
 
@@ -164,36 +233,42 @@ class P2PManager extends EventEmitter {
     const fileSize = fileStats.size;
     const chunkSize = 16 * 1024; // 16KB chunks
 
-    // Before sending file
-    const fileHash = await this.fileManager.calculateFileHash(filePath);
+    // Send file metadata
     dataChannel.send(JSON.stringify({
       type: 'file-start',
       name: fileName,
-      size: fileSize,
-      hash: fileHash  // Add hash to metadata
+      size: fileSize
     }));
 
-    const fileStream = fs.createReadStream(filePath, { highWaterMark: chunkSize });
-    let bytesSent = 0;
+    try {
+      const fileStream = fs.createReadStream(filePath, { highWaterMark: chunkSize });
+      let bytesSent = 0;
 
-    for await (const chunk of fileStream) {
-      // Flow control: wait if the buffer is getting full
-      if (dataChannel.bufferedAmount > dataChannel.bufferedAmountLowThreshold) {
-        await new Promise(resolve => {
-          dataChannel.onbufferedamountlow = resolve;
+      for await (const chunk of fileStream) {
+        // Flow control: wait if the buffer is getting full
+        while (dataChannel.bufferedAmount > dataChannel.bufferedAmountLowThreshold) {
+          await new Promise(resolve => setTimeout(resolve, 100));
+        }
+
+        // Send the chunk as ArrayBuffer
+        dataChannel.send(chunk);
+        bytesSent += chunk.length;
+        
+        this.emit('transfer-progress', {
+          peerId,
+          progress: (bytesSent / fileSize) * 100,
+          bytesSent,
+          totalBytes: fileSize
         });
       }
 
-      dataChannel.send(chunk);
-      bytesSent += chunk.length;
-      this.emit('transfer-progress', {
-        peerId,
-        progress: (bytesSent / fileSize) * 100
-      });
+      dataChannel.send(JSON.stringify({ type: 'file-end' }));
+      this.emit('transfer-complete', { peerId, fileName });
+    } catch (error) {
+      console.error('Error sending file:', error);
+      this.emit('error', error);
+      throw error;
     }
-
-    dataChannel.send(JSON.stringify({ type: 'file-end' }));
-    this.emit('transfer-complete', { peerId, fileName });
   }
 
   handleMessage(peerId, message) {
