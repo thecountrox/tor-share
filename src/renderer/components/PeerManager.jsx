@@ -75,19 +75,19 @@ const PeerManager = () => {
       </Typography>
 
       <List>
-        {peers.map((peer) => (
-          <ListItem key={peer.id}>
+        {peers.map((peerId) => (
+          <ListItem key={peerId}>
             <ListItemText
-              primary={`Peer ${peer.id}`}
+              primary={`Peer ${peerId}`}
               secondary={
-                transfers[peer.id] ? (
+                transfers[peerId] ? (
                   <Box>
                     <Typography variant="body2">
-                      {transfers[peer.id].status}
+                      {transfers[peerId].status}
                     </Typography>
                     <LinearProgress
                       variant="determinate"
-                      value={transfers[peer.id].progress * 100}
+                      value={transfers[peerId].progress * 100}
                     />
                   </Box>
                 ) : null
@@ -95,7 +95,7 @@ const PeerManager = () => {
             />
             <Button
               variant="contained"
-              onClick={() => handleSendFile(peer.id)}
+              onClick={() => handleSendFile(peerId)}
               disabled={!selectedFile}
             >
               Send File
