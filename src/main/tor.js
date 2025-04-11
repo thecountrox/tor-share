@@ -22,8 +22,8 @@ const startTor = async (torDataDir) => {
   // Create torrc file
   const torrcPath = path.join(torDataDir, 'torrc');
   await fs.writeFile(torrcPath, `
-SocksPort 9050
-ControlPort 9051
+SocksPort 9055
+ControlPort 9056
 DataDirectory ${torDataDir}
 HashedControlPassword ${CONTROL_PASSWORD_HASH}
 `);
@@ -77,7 +77,7 @@ const stopTor = async () => {
   console.log('Stopping Tor...');
 
   try {
-    execSync(`${path.join(__dirname, '../../resources/tor', process.platform, 'tor')} --controlport 9051 --hash-password ${CONTROL_PASSWORD_HASH} --signal halt`);
+    execSync(`${path.join(__dirname, '../../resources/tor', process.platform, 'tor')} --controlport 9056 --hash-password ${CONTROL_PASSWORD_HASH} --signal halt`);
     console.log('Sent HALT signal to Tor');
     torProcess = null;
     status = 'not started';
