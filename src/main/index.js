@@ -40,7 +40,7 @@ const initializeApp = async () => {
     mainWindow?.webContents.send("tor-status", "started");
 
     // Initialize P2P manager
-    p2pManager = new P2PManager(mainWindow);
+    p2pManager = new P2PManager();
     await p2pManager.connect(
       "tfl5mirmj5griokqsfelbuinfoanjscuhvedxqrlhfivn7lmce5bjlid.onion",
     );
@@ -66,25 +66,24 @@ const initializeApp = async () => {
       mainWindow?.webContents.send("transfer-complete", data);
     });
 
-    p2pManager.on('error', (error) => {
-      console.error('[DEBUG] P2P error:', error);
-      try {
-        mainWindow?.webContents.send('transfer-error', 
-          typeof error === 'object' ? error : { message: String(error) });
-      } catch (sendError) {
-        console.error('[DEBUG] Error forwarding error event:', sendError);
-      }
+    p2pManager.on("file-receive-start", (data) => {
+      mainWindow?.webContents.send("file-receive-start", data);
     });
 
-    p2pManager.on("file-receive-start", (data) => {
-      console.log('[DEBUG] Forwarding file-receive-start event to renderer:', data);
-      try {
-        mainWindow?.webContents.send("file-receive-start", data);
-        console.log('[DEBUG] Successfully forwarded file-receive-start event');
-      } catch (error) {
-        console.error('[DEBUG] Error forwarding file-receive-start event:', error);
-      }
+    p2pManager.on("file-receive-complete", (data) => {
+      mainWindow?.webContents.send("file-receive-complete", data);
     });
+
+    p2pManager.on("error", (error) => {
+      console.error("[DEBUG] P2P error:", error);
+      mainWindow?.webContents.send("error", error);
+    });
+
+    p2pManager.on("transfer-error", (error) => {
+      console.error("[DEBUG] Transfer error:", error);
+      mainWindow?.webContents.send("transfer-error", error);
+    });
+
   } catch (error) {
     console.error("Failed to initialize app:", error);
     mainWindow?.webContents.send("tor-status", "error");
@@ -94,7 +93,7 @@ const initializeApp = async () => {
 
 app.whenReady().then(() => {
   createWindow();
-  initializeApp().catch(console.error);
+  initializeApp();
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) {
@@ -103,28 +102,10 @@ app.whenReady().then(() => {
   });
 });
 
-app.on("window-all-closed", async () => {
+app.on("window-all-closed", () => {
   if (process.platform !== "darwin") {
-    if (p2pManager) {
-      await p2pManager.disconnect();
-    }
-    if (signalingServer) {
-      await signalingServer.stop();
-    }
-    await fs.remove(torDataDir);
     app.quit();
   }
-});
-
-app.on("will-quit", () => {
-  if (p2pManager) {
-    p2pManager.disconnect();
-  }
-  app.quit();
-});
-
-app.on("quit", () => {
-  stopTor();
 });
 
 // IPC handlers
@@ -137,7 +118,6 @@ ipcMain.handle("start-tor", async () => {
 });
 
 ipcMain.handle("stop-tor", async () => {
-  mainWindow?.webContents.send("tor-status", "stopping");
   await stopTor();
   const status = getTorStatus();
   mainWindow?.webContents.send("tor-status", status);
@@ -148,8 +128,17 @@ ipcMain.handle("status-tor", () => {
   return getTorStatus();
 });
 
+ipcMain.handle("connect-peer", async (event, peerId) => {
+  try {
+    await p2pManager.connectPeer(peerId);
+    return true;
+  } catch (error) {
+    console.error("Failed to connect to peer:", error);
+    throw error;
+  }
+});
+
 ipcMain.handle("select-file", async () => {
-  const { dialog } = require("electron");
   const result = await dialog.showOpenDialog(mainWindow, {
     properties: ["openFile"],
   });
@@ -161,21 +150,39 @@ ipcMain.handle("select-file", async () => {
       path: filePath,
       name: path.basename(filePath),
       size: stats.size,
+      lastModified: stats.mtimeMs,
     };
   }
   return null;
 });
 
 ipcMain.handle("send-file", async (event, peerId, filePath) => {
-  await p2pManager.sendFile(peerId, filePath);
-});
-
-ipcMain.handle("refresh-peers", async () => {
-  if (p2pManager && p2pManager.socket) {
-    p2pManager.socket.emit('discover');
+  try {
+    await p2pManager.sendFile(peerId, filePath);
+    return true;
+  } catch (error) {
+    console.error("Failed to send file:", error);
+    throw error;
   }
 });
 
-ipcMain.handle("connect-peer", async (event, peerId) => {
-  await p2pManager.initiateConnection(peerId);
+ipcMain.handle("refresh-peers", () => {
+  p2pManager.refreshPeers();
+});
+
+// Handle app shutdown
+app.on("before-quit", async () => {
+  try {
+    if (p2pManager) {
+      await p2pManager.disconnect();
+    }
+    if (signalingServer) {
+      await signalingServer.stop();
+    }
+    if (torDataDir) {
+      await fs.remove(torDataDir);
+    }
+  } catch (error) {
+    console.error("Error during shutdown:", error);
+  }
 });

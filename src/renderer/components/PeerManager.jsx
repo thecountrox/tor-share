@@ -1,6 +1,23 @@
 import React, { useState, useEffect } from 'react';
-import { Box, Button, List, ListItem, ListItemText, Typography, LinearProgress } from '@mui/material';
+import { 
+  Box, 
+  Button, 
+  List, 
+  ListItem, 
+  ListItemText, 
+  Typography, 
+  LinearProgress,
+  Chip,
+  Alert,
+  Snackbar,
+  CircularProgress,
+  Tooltip,
+  IconButton
+} from '@mui/material';
 import RefreshIcon from '@mui/icons-material/Refresh';
+import ErrorIcon from '@mui/icons-material/Error';
+import CheckCircleIcon from '@mui/icons-material/CheckCircle';
+import DeleteIcon from '@mui/icons-material/Delete';
 
 const PeerManager = () => {
   const [selfId, setSelfId] = useState(null);
@@ -8,6 +25,7 @@ const PeerManager = () => {
   const [transfers, setTransfers] = useState({});
   const [selectedFile, setSelectedFile] = useState(null);
   const [connectedPeers, setConnectedPeers] = useState(new Set());
+  const [error, setError] = useState(null);
 
   useEffect(() => {
     // Set up event listeners when component mounts
@@ -31,7 +49,11 @@ const PeerManager = () => {
           [data.peerId]: {
             ...prev[data.peerId],
             progress: data.progress,
-            status: prev[data.peerId]?.status || 'unknown'
+            received: data.received,
+            total: data.total,
+            fileName: data.fileName,
+            transferSpeed: data.transferSpeed,
+            status: prev[data.peerId]?.status || 'transferring'
           }
         }));
       } catch (error) {
@@ -59,6 +81,7 @@ const PeerManager = () => {
               ...prev[data.peerId],
               fileName: data.fileName,
               fileSize: data.fileSize,
+              mime: data.mime,
               progress: 0,
               status: 'receiving'
             }
@@ -70,9 +93,30 @@ const PeerManager = () => {
         console.error('[DEBUG-UI] Error updating transfers for file receive start:', error);
       }
     });
-    
-    const removeTransferErrorListener = window.electron.onTransferError && window.electron.onTransferError((error) => {
+
+    const removeTransferCompleteListener = window.electron.onTransferComplete((data) => {
+      console.log('[DEBUG-UI] Transfer complete:', data);
+      setTransfers((prev) => ({
+        ...prev,
+        [data.peerId]: {
+          ...prev[data.peerId],
+          status: 'complete',
+          progress: 100
+        }
+      }));
+    });
+
+    const removeTransferErrorListener = window.electron.onTransferError((error) => {
       console.error('[DEBUG-UI] Transfer error:', error);
+      setError(error.message || 'Transfer failed');
+      setTransfers((prev) => ({
+        ...prev,
+        [error.peerId]: {
+          ...prev[error.peerId],
+          status: 'error',
+          error: error.message
+        }
+      }));
     });
 
     // Clean up event listeners when component unmounts
@@ -82,8 +126,9 @@ const PeerManager = () => {
       removePeerListListener();
       removeTransferProgressListener();
       removeChannelOpenListener();
-      if (removeTransferErrorListener) removeTransferErrorListener();
+      removeTransferErrorListener();
       removeFileReceiveStartListener();
+      removeTransferCompleteListener();
     };
   }, []);
 
@@ -115,88 +160,159 @@ const PeerManager = () => {
       await window.electron.sendFile(peerId, selectedFile.path);
       setTransfers((prev) => ({
         ...prev,
-        [peerId]: { progress: 0, status: 'sending' }
+        [peerId]: { 
+          progress: 0, 
+          status: 'sending',
+          fileName: selectedFile.name
+        }
       }));
     } catch (error) {
       console.error('Failed to send file:', error);
+      setError(error.message);
     }
   };
 
   const handleRefresh = () => {
-    window.electron.refreshPeers(); // This will trigger a new discover event
+    window.electron.refreshPeers();
+  };
+
+  const handleClearTransfer = (peerId) => {
+    setTransfers((prev) => {
+      const newState = { ...prev };
+      delete newState[peerId];
+      return newState;
+    });
+  };
+
+  const formatFileSize = (bytes) => {
+    if (bytes === 0) return '0 B';
+    const k = 1024;
+    const sizes = ['B', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return `${parseFloat((bytes / Math.pow(k, i)).toFixed(2))} ${sizes[i]}`;
+  };
+
+  const getTransferStatusColor = (status) => {
+    switch (status) {
+      case 'transferring':
+      case 'sending':
+      case 'receiving':
+        return 'primary';
+      case 'complete':
+        return 'success';
+      case 'error':
+        return 'error';
+      default:
+        return 'default';
+    }
   };
 
   return (
     <Box sx={{ p: 2 }}>
-      <Typography variant="h6" gutterBottom>
-        Your ID: {selfId || 'Connecting...'}
+      <Typography variant="h5" gutterBottom>
+        Tor Share
       </Typography>
-
-      <Button
-        variant="contained"
-        onClick={handleFileSelect}
-        sx={{ mb: 2 }}
-      >
-        Select File
-      </Button>
-
-      {selectedFile && (
-        <Typography variant="body2" sx={{ mb: 2 }}>
-          Selected file: {selectedFile.name}
-        </Typography>
-      )}
-
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 2 }}>
-        <Typography variant="h6">Connected Peers</Typography>
-        <Button 
-          variant="outlined" 
-          onClick={handleRefresh}
-          startIcon={<RefreshIcon />}
-        >
-          Refresh
+      
+      <Box sx={{ mb: 2, display: 'flex', gap: 2 }}>
+        <Button variant="contained" onClick={handleFileSelect}>
+          Select File
+        </Button>
+        <Button variant="outlined" onClick={handleRefresh} startIcon={<RefreshIcon />}>
+          Refresh Peers
         </Button>
       </Box>
 
+      {selectedFile && (
+        <Typography variant="body1" sx={{ mb: 2 }}>
+          Selected file: {selectedFile.name} ({formatFileSize(selectedFile.size)})
+        </Typography>
+      )}
+
+      <Typography variant="h6" gutterBottom>
+        Available Peers
+      </Typography>
+      
       <List>
-        {peers.map((peerId) => (
-          <ListItem key={peerId}>
-            <ListItemText
-              primary={`Peer ${peerId}`}
-              secondary={
-                <Box>
+        {peers.map((peer) => (
+          <ListItem 
+            key={peer} 
+            sx={{ 
+              border: '1px solid #ccc', 
+              borderRadius: 1, 
+              mb: 1,
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'flex-start'
+            }}
+          >
+            <Box sx={{ width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <ListItemText 
+                primary={peer} 
+                secondary={connectedPeers.has(peer) ? 'Connected' : 'Not connected'} 
+              />
+              {selectedFile && (
+                <Button 
+                  variant="contained" 
+                  onClick={() => handleSendFile(peer)}
+                  disabled={!connectedPeers.has(peer)}
+                >
+                  Send File
+                </Button>
+              )}
+            </Box>
+
+            {transfers[peer] && (
+              <Box sx={{ width: '100%', mt: 1 }}>
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
                   <Typography variant="body2">
-                    {connectedPeers.has(peerId) ? 'Connected' : 'Not connected'}
+                    {transfers[peer].fileName} - {formatFileSize(transfers[peer].received || 0)} / {formatFileSize(transfers[peer].total || 0)}
                   </Typography>
-                  {transfers[peerId] && (
-                    <>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                    {transfers[peer].transferSpeed && (
                       <Typography variant="body2">
-                        {transfers[peerId].status}
+                        {transfers[peer].transferSpeed} KB/s
                       </Typography>
-                      <LinearProgress
-                        variant="determinate"
-                        value={transfers[peerId].progress * 100}
-                      />
-                    </>
-                  )}
+                    )}
+                    <Chip 
+                      label={transfers[peer].status} 
+                      color={getTransferStatusColor(transfers[peer].status)}
+                      size="small"
+                    />
+                    {transfers[peer].status === 'complete' && (
+                      <Tooltip title="Clear transfer">
+                        <IconButton size="small" onClick={() => handleClearTransfer(peer)}>
+                          <DeleteIcon fontSize="small" />
+                        </IconButton>
+                      </Tooltip>
+                    )}
+                  </Box>
                 </Box>
-              }
-            />
-            <Button
-              variant="contained"
-              onClick={() => handleSendFile(peerId)}
-              disabled={!selectedFile}
-            >
-              Send File
-            </Button>
+                <LinearProgress 
+                  variant="determinate" 
+                  value={transfers[peer].progress} 
+                  color={getTransferStatusColor(transfers[peer].status)}
+                />
+                {transfers[peer].status === 'error' && (
+                  <Typography variant="body2" color="error" sx={{ mt: 1 }}>
+                    {transfers[peer].error}
+                  </Typography>
+                )}
+              </Box>
+            )}
           </ListItem>
         ))}
       </List>
 
-      {peers.length === 0 && (
-        <Typography variant="body1" color="text.secondary">
-          No peers connected
-        </Typography>
-      )}
+      <Snackbar 
+        open={!!error} 
+        autoHideDuration={6000} 
+        onClose={() => setError(null)}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+      >
+        <Alert onClose={() => setError(null)} severity="error" sx={{ width: '100%' }}>
+          {error}
+        </Alert>
+      </Snackbar>
     </Box>
   );
 };

@@ -16,6 +16,7 @@ contextBridge.exposeInMainWorld("electron", {
 
   // Peer connections
   connectPeer: (peerId) => ipcRenderer.invoke("connect-peer", peerId),
+  refreshPeers: () => ipcRenderer.invoke("refresh-peers"),
 
   // File operations
   selectFile: () => ipcRenderer.invoke("select-file"),
@@ -42,13 +43,20 @@ contextBridge.exposeInMainWorld("electron", {
     ipcRenderer.on("transfer-complete", (_, data) => callback(data));
     return () => ipcRenderer.removeAllListeners("transfer-complete");
   },
-  refreshPeers: () => ipcRenderer.invoke("refresh-peers"),
   onFileReceiveStart: (callback) => {
     ipcRenderer.on("file-receive-start", (_, data) => callback(data));
     return () => ipcRenderer.removeAllListeners("file-receive-start");
   },
+  onFileReceiveComplete: (callback) => {
+    ipcRenderer.on("file-receive-complete", (_, data) => callback(data));
+    return () => ipcRenderer.removeAllListeners("file-receive-complete");
+  },
   onTransferError: (callback) => {
-    ipcRenderer.on("transfer-error", (_, data) => callback(data));
+    ipcRenderer.on("transfer-error", (_, error) => callback(error));
     return () => ipcRenderer.removeAllListeners("transfer-error");
+  },
+  onError: (callback) => {
+    ipcRenderer.on("error", (_, error) => callback(error));
+    return () => ipcRenderer.removeAllListeners("error");
   }
 });
