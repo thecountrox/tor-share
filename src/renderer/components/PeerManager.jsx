@@ -144,12 +144,27 @@ const PeerManager = () => {
     try {
       // First ensure we have a connection
       if (!connectedPeers.has(peerId)) {
+        // Set transfer state to connecting
+        setTransfers((prev) => ({
+          ...prev,
+          [peerId]: { 
+            status: 'connecting',
+            fileName: selectedFile.name
+          }
+        }));
+
         await window.electron.connectPeer(peerId);
+        
         // Wait for the connection to be established
-        await new Promise((resolve) => {
+        await new Promise((resolve, reject) => {
+          const timeout = setTimeout(() => {
+            reject(new Error('Connection timeout'));
+          }, 10000);
+
           const checkConnection = setInterval(() => {
             if (connectedPeers.has(peerId)) {
               clearInterval(checkConnection);
+              clearTimeout(timeout);
               resolve();
             }
           }, 100);
@@ -169,6 +184,14 @@ const PeerManager = () => {
     } catch (error) {
       console.error('Failed to send file:', error);
       setError(error.message);
+      setTransfers((prev) => ({
+        ...prev,
+        [peerId]: { 
+          status: 'error',
+          error: error.message,
+          fileName: selectedFile.name
+        }
+      }));
     }
   };
 
@@ -254,7 +277,7 @@ const PeerManager = () => {
                 <Button 
                   variant="contained" 
                   onClick={() => handleSendFile(peer)}
-                  disabled={!connectedPeers.has(peer)}
+                  disabled={transfers[peer]?.status === 'sending' || transfers[peer]?.status === 'connecting'}
                 >
                   Send File
                 </Button>
