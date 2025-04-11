@@ -152,8 +152,8 @@ class P2PManager extends EventEmitter {
     dataChannel.binaryType = "arraybuffer";
     this.dataChannels.set(peerId, dataChannel);
 
-    let currentChunkIndex = 0;
-    let expectedChunkSize = 0;
+    let currentFileInfo = null;
+    let receivedChunks = [];
 
     dataChannel.onmessage = async (event) => {
       try {
@@ -165,6 +165,12 @@ class P2PManager extends EventEmitter {
             case 'file-start':
               try {
                 const downloadPath = await this.fileManager.startFileDownload(peerId, data.name, data.size);
+                currentFileInfo = {
+                  name: data.name,
+                  size: data.size,
+                  path: downloadPath
+                };
+                receivedChunks = [];
                 this.emit('file-receive-start', {
                   peerId,
                   fileName: data.name,
@@ -180,43 +186,44 @@ class P2PManager extends EventEmitter {
               }
               break;
 
-            case 'chunk-start':
-              expectedChunkSize = data.size;
-              currentChunkIndex = data.index;
-              break;
-
-            case 'chunk-ack':
-              const resolve = this.pendingAcks.get(data.index);
-              if (resolve) {
-                resolve();
-                this.pendingAcks.delete(data.index);
-              }
-              break;
-
             case 'file-end':
               try {
+                if (!currentFileInfo) {
+                  throw new Error('Received file-end without file-start');
+                }
+                
+                // Write all chunks to file
+                const fileBuffer = Buffer.concat(receivedChunks);
+                await fs.writeFile(currentFileInfo.path, fileBuffer);
+                
                 const filePath = await this.fileManager.completeDownload(peerId);
                 this.emit('file-receive-complete', { peerId, filePath });
+                
+                // Reset state
+                currentFileInfo = null;
+                receivedChunks = [];
               } catch (error) {
                 console.error('[DEBUG] Error completing download:', error);
+                await this.fileManager.cleanupDownload(peerId);
               }
               break;
           }
         } else {
           // Binary chunk received
           try {
-            const chunk = Buffer.from(event.data);
-            const progress = await this.fileManager.writeChunk(peerId, chunk, currentChunkIndex);
+            if (!currentFileInfo) {
+              throw new Error('Received binary data without file metadata');
+            }
             
-            // Send acknowledgment
-            dataChannel.send(JSON.stringify({
-              type: 'chunk-ack',
-              index: currentChunkIndex
-            }));
-
+            const chunk = Buffer.from(event.data);
+            receivedChunks.push(chunk);
+            
+            const totalReceived = receivedChunks.reduce((sum, c) => sum + c.length, 0);
             this.emit('transfer-progress', {
               peerId,
-              ...progress
+              progress: (totalReceived / currentFileInfo.size) * 100,
+              received: totalReceived,
+              total: currentFileInfo.size
             });
           } catch (error) {
             console.error('[DEBUG] Error processing chunk:', error);
@@ -256,8 +263,7 @@ class P2PManager extends EventEmitter {
     dataChannel.send(JSON.stringify({
       type: 'file-start',
       name: fileName,
-      size: fileSize,
-      chunkSize: this.chunkSize
+      size: fileSize
     }));
 
     // Wait for ready signal
@@ -285,31 +291,16 @@ class P2PManager extends EventEmitter {
 
     try {
       console.log('[DEBUG] Starting chunk transfer');
-      const fileStream = fs.createReadStream(filePath, { highWaterMark: this.chunkSize });
+      const fileBuffer = await fs.readFile(filePath);
+      let offset = 0;
       let bytesSent = 0;
-      let chunkIndex = 0;
-      let inFlightChunks = 0;
 
-      for await (const chunk of fileStream) {
-        // Wait if we have too many unacknowledged chunks
-        while (inFlightChunks >= this.windowSize) {
-          await new Promise(resolve => {
-            this.pendingAcks.set(chunkIndex, resolve);
-          });
-          inFlightChunks--;
-        }
-
-        // Send chunk metadata
-        dataChannel.send(JSON.stringify({
-          type: 'chunk-start',
-          index: chunkIndex,
-          size: chunk.length
-        }));
-
+      while (offset < fileBuffer.length) {
+        const chunk = fileBuffer.slice(offset, offset + this.chunkSize);
+        offset += this.chunkSize;
+        
         // Send chunk data
         dataChannel.send(chunk);
-        inFlightChunks++;
-        chunkIndex++;
         bytesSent += chunk.length;
 
         this.emit('transfer-progress', {
@@ -318,17 +309,15 @@ class P2PManager extends EventEmitter {
           bytesSent,
           totalBytes: fileSize
         });
+
+        // Small delay to prevent overwhelming the receiver
+        await new Promise(resolve => setTimeout(resolve, 10));
       }
 
-      // Wait for remaining acknowledgments
-      while (inFlightChunks > 0) {
-        await new Promise(resolve => setTimeout(resolve, 100));
-      }
-
+      // Send end signal
       console.log('[DEBUG] File transfer complete, sending end signal');
       dataChannel.send(JSON.stringify({ 
-        type: 'file-end',
-        totalChunks: chunkIndex
+        type: 'file-end'
       }));
 
       this.emit('transfer-complete', { peerId, fileName });
