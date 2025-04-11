@@ -186,3 +186,7 @@ app.on("before-quit", async () => {
     console.error("Error during shutdown:", error);
   }
 });
+
+app.on("quit", () => {
+  stopTor();
+});

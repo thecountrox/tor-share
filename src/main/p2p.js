@@ -562,6 +562,16 @@ class P2PManager extends EventEmitter {
       }
     }
   }
+
+  refreshPeers() {
+    console.log('[DEBUG] Refreshing peer list');
+    if (this.socket && this.socket.connected) {
+      this.socket.emit('discover');
+    } else {
+      console.error('[DEBUG] Socket not connected, cannot refresh peers');
+      this.emit('error', new Error('Socket not connected'));
+    }
+  }
 }
 
 module.exports = P2PManager;
