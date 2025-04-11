@@ -11,33 +11,79 @@ const PeerManager = () => {
 
   useEffect(() => {
     // Set up event listeners when component mounts
-    const removeSelfIdListener = window.electron.onSelfId((id) => setSelfId(id));
-    const removePeerListListener = window.electron.onPeerList((peerList) => setPeers(peerList));
+    console.log('[DEBUG-UI] Setting up event listeners');
+    
+    const removeSelfIdListener = window.electron.onSelfId((id) => {
+      console.log('[DEBUG-UI] Received self ID:', id);
+      setSelfId(id);
+    });
+    
+    const removePeerListListener = window.electron.onPeerList((peerList) => {
+      console.log('[DEBUG-UI] Received peer list:', peerList);
+      setPeers(peerList);
+    });
+    
     const removeTransferProgressListener = window.electron.onTransferProgress((data) => {
-      setTransfers((prev) => ({
-        ...prev,
-        [data.peerId]: {
-          ...prev[data.peerId],
-          progress: data.progress,
-          status: data.status
-        }
-      }));
+      console.log('[DEBUG-UI] Received transfer progress:', data);
+      try {
+        setTransfers((prev) => ({
+          ...prev,
+          [data.peerId]: {
+            ...prev[data.peerId],
+            progress: data.progress,
+            status: prev[data.peerId]?.status || 'unknown'
+          }
+        }));
+      } catch (error) {
+        console.error('[DEBUG-UI] Error updating transfer progress:', error);
+      }
     });
+    
     const removeChannelOpenListener = window.electron.onPeerConnected((peerId) => {
-      setConnectedPeers(prev => new Set([...prev, peerId]));
+      console.log('[DEBUG-UI] Channel opened with peer:', peerId);
+      try {
+        setConnectedPeers(prev => new Set([...prev, peerId]));
+      } catch (error) {
+        console.error('[DEBUG-UI] Error updating connected peers:', error);
+      }
     });
-    const removeTransferErrorListener = window.electron.onTransferError((error) => {
-      console.error('Transfer error:', error);
-      // You could show this in the UI with a snackbar or alert
+
+    const removeFileReceiveStartListener = window.electron.onFileReceiveStart((data) => {
+      console.log('[DEBUG-UI] Received file-receive-start event:', data);
+      try {
+        setTransfers((prev) => {
+          console.log('[DEBUG-UI] Current transfers state:', prev);
+          const newState = {
+            ...prev,
+            [data.peerId]: {
+              ...prev[data.peerId],
+              fileName: data.fileName,
+              fileSize: data.fileSize,
+              progress: 0,
+              status: 'receiving'
+            }
+          };
+          console.log('[DEBUG-UI] New transfers state:', newState);
+          return newState;
+        });
+      } catch (error) {
+        console.error('[DEBUG-UI] Error updating transfers for file receive start:', error);
+      }
+    });
+    
+    const removeTransferErrorListener = window.electron.onTransferError && window.electron.onTransferError((error) => {
+      console.error('[DEBUG-UI] Transfer error:', error);
     });
 
     // Clean up event listeners when component unmounts
     return () => {
+      console.log('[DEBUG-UI] Cleaning up event listeners');
       removeSelfIdListener();
       removePeerListListener();
       removeTransferProgressListener();
       removeChannelOpenListener();
-      removeTransferErrorListener();
+      if (removeTransferErrorListener) removeTransferErrorListener();
+      removeFileReceiveStartListener();
     };
   }, []);
 

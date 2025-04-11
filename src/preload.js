@@ -48,7 +48,7 @@ contextBridge.exposeInMainWorld("electron", {
     return () => ipcRenderer.removeAllListeners("file-receive-start");
   },
   onTransferError: (callback) => {
-    ipcRenderer.on("transfer-error", (_, error) => callback(error));
+    ipcRenderer.on("transfer-error", (_, data) => callback(data));
     return () => ipcRenderer.removeAllListeners("transfer-error");
   }
 });

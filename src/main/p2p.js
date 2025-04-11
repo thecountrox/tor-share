@@ -1,99 +1,115 @@
-const { EventEmitter } = require('events');
-const wrtc = require('wrtc');
-const { io } = require('socket.io-client');
-const { SocksProxyAgent } = require('socks-proxy-agent');
-const path = require('path');
-const fs = require('fs-extra');
-const { app } = require('electron');
-const FileManager = require('./file');
+const { EventEmitter } = require("events");
+const wrtc = require("wrtc");
+const { io } = require("socket.io-client");
+const { SocksProxyAgent } = require("socks-proxy-agent");
+const path = require("path");
+const fs = require("fs-extra");
+const { app } = require("electron");
+const FileManager = require("./file");
 
 class P2PManager extends EventEmitter {
   constructor() {
     super();
+    console.log("[DEBUG] Initializing P2PManager");
     this.peerConnections = new Map();
     this.dataChannels = new Map();
     this.socket = null;
     this.peerId = null;
-    this.fileManager = new FileManager(path.join(app.getPath('downloads'), 'tor-share'));
+
+    // Initialize FileManager with absolute path
+    const downloadDir = path.join(app.getPath("downloads"), "tor-share");
+    console.log("[DEBUG] Creating FileManager with directory:", downloadDir);
+    this.fileManager = new FileManager(downloadDir);
+
+    // Bind methods to ensure correct 'this' context
+    this.handleMessage = this.handleMessage.bind(this);
+    this.setupDataChannel = this.setupDataChannel.bind(this);
+
     this.configuration = {
       iceServers: [
         {
-          urls: 'stun:stun.l.google.com:19302'
-        }
-      ]
+          urls: "stun:stun.l.google.com:19302",
+        },
+      ],
     };
+
+    this.pendingAcks = new Map(); // Track pending acknowledgments
+    this.windowSize = 5; // Number of chunks to send before waiting for acks
+    this.chunkSize = 16 * 1024; // 16KB chunks
   }
 
   async connect(onionAddress) {
     // Connect to the signaling server through Tor
-    const agent = new SocksProxyAgent('socks5h://127.0.0.1:9050');
-    
-    console.log("Connecting to signaling server.....")
+    const agent = new SocksProxyAgent("socks5h://127.0.0.1:9050");
+
+    console.log("Connecting to signaling server.....");
 
     this.socket = io(`http://${onionAddress}`, {
       agent,
-      transports: ['websocket'],
-      upgrade: false
+      transports: ["websocket"],
+      upgrade: false,
     });
 
     // Handle signaling server events
-    this.socket.on('connect', () => {
-      console.log('Connected to signaling server!');
-      this.socket.emit('discover');
+    this.socket.on("connect", () => {
+      console.log("Connected to signaling server!");
+      this.socket.emit("discover");
     });
 
-    this.socket.on('peer-id', (id) => {
-      console.log('Received peer ID:', id);
+    this.socket.on("peer-id", (id) => {
+      console.log("Received peer ID:", id);
       this.peerId = id;
-      this.emit('ready', id);
+      this.emit("ready", id);
     });
 
-    this.socket.on('peers', (peers) => {
-      console.log('Available peers:', peers);
-      this.emit('peers', peers);
+    this.socket.on("peers", (peers) => {
+      console.log("Available peers:", peers);
+      this.emit("peers", peers);
     });
 
-    this.socket.on('signal', async ({ fromPeerId, signal }) => {
-      console.log('Received signal from peer:', fromPeerId);
+    this.socket.on("signal", async ({ fromPeerId, signal }) => {
+      console.log("Received signal from peer:", fromPeerId);
       await this.handleSignal(fromPeerId, signal);
     });
 
-    this.socket.on('peer-disconnected', (peerId) => {
-      console.log('Peer disconnected:', peerId);
+    this.socket.on("peer-disconnected", (peerId) => {
+      console.log("Peer disconnected:", peerId);
       this.cleanupPeer(peerId);
-      this.emit('peer-disconnected', peerId);
+      this.emit("peer-disconnected", peerId);
     });
 
     // Set up periodic peer discovery
     this.discoveryInterval = setInterval(() => {
       if (this.socket && this.socket.connected) {
-        this.socket.emit('discover');
+        this.socket.emit("discover");
       }
     }, 10000); // Refresh every 10 seconds
   }
 
   async createPeerConnection(peerId, initiator = false) {
-    console.log(`Creating peer connection with ${peerId} (initiator: ${initiator})`);
-    
+    console.log(
+      `Creating peer connection with ${peerId} (initiator: ${initiator})`,
+    );
+
     const pc = new wrtc.RTCPeerConnection(this.configuration);
     this.peerConnections.set(peerId, pc);
 
     // Handle ICE candidates
     pc.onicecandidate = (event) => {
       if (event.candidate) {
-        this.socket.emit('signal', {
+        this.socket.emit("signal", {
           targetPeerId: peerId,
           signal: {
-            type: 'candidate',
-            candidate: event.candidate
-          }
+            type: "candidate",
+            candidate: event.candidate,
+          },
         });
       }
     };
 
     // Handle data channel
     if (initiator) {
-      const dataChannel = pc.createDataChannel('fileTransfer');
+      const dataChannel = pc.createDataChannel("fileTransfer");
       this.setupDataChannel(peerId, dataChannel);
     } else {
       pc.ondatachannel = (event) => {
@@ -106,123 +122,126 @@ class P2PManager extends EventEmitter {
 
   async handleSignal(peerId, signal) {
     let pc = this.peerConnections.get(peerId);
-    
+
     if (!pc) {
       pc = await this.createPeerConnection(peerId, false);
     }
 
     try {
-      if (signal.type === 'offer') {
+      if (signal.type === "offer") {
         await pc.setRemoteDescription(new wrtc.RTCSessionDescription(signal));
         const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
-        
-        this.socket.emit('signal', {
+
+        this.socket.emit("signal", {
           targetPeerId: peerId,
-          signal: answer
+          signal: answer,
         });
-      }
-      else if (signal.type === 'answer') {
+      } else if (signal.type === "answer") {
         await pc.setRemoteDescription(new wrtc.RTCSessionDescription(signal));
-      }
-      else if (signal.type === 'candidate') {
+      } else if (signal.type === "candidate") {
         await pc.addIceCandidate(new wrtc.RTCIceCandidate(signal.candidate));
       }
     } catch (error) {
-      console.error('Error handling signal:', error);
+      console.error("Error handling signal:", error);
     }
   }
 
   setupDataChannel(peerId, dataChannel) {
-    console.log('Setting up data channel for peer:', peerId);
-    dataChannel.binaryType = 'arraybuffer';
+    console.log("[DEBUG] Setting up data channel for peer:", peerId);
+    dataChannel.binaryType = "arraybuffer";
     this.dataChannels.set(peerId, dataChannel);
 
-    dataChannel.onopen = () => {
-      console.log('Data channel opened with peer:', peerId);
-      this.emit('channel-open', peerId);
-    };
-
-    dataChannel.onclose = () => {
-      console.log('Data channel closed with peer:', peerId);
-      this.emit('channel-close', peerId);
-      this.cleanupPeer(peerId);
-    };
+    let currentChunkIndex = 0;
+    let expectedChunkSize = 0;
 
     dataChannel.onmessage = async (event) => {
       try {
         if (typeof event.data === 'string') {
-          // Handle JSON messages
           const data = JSON.parse(event.data);
+          console.log('[DEBUG] Received message type:', data.type);
+
           switch (data.type) {
             case 'file-start':
-              console.log('Starting file receive:', data);
               try {
-                await this.fileManager.startFileDownload(peerId, data.name, data.size);
+                const downloadPath = await this.fileManager.startFileDownload(peerId, data.name, data.size);
                 this.emit('file-receive-start', {
                   peerId,
                   fileName: data.name,
                   fileSize: data.size,
                 });
+                dataChannel.send(JSON.stringify({ type: 'file-ready' }));
               } catch (error) {
-                console.error('Failed to start file download:', error);
-                this.emit('error', {
-                  type: 'file-receive-error',
-                  peerId,
-                  error: error.message
-                });
-                // Notify the sender that we failed to start the download
-                dataChannel.send(JSON.stringify({
-                  type: 'file-error',
-                  error: 'Failed to start download'
+                console.error('[DEBUG] Error starting file download:', error);
+                dataChannel.send(JSON.stringify({ 
+                  type: 'error', 
+                  error: 'Failed to start download' 
                 }));
               }
               break;
-            case 'file-end':
-              console.log('Completing file receive');
-              const filePath = await this.fileManager.completeDownload(peerId);
-              this.emit('file-receive-complete', { peerId, filePath });
+
+            case 'chunk-start':
+              expectedChunkSize = data.size;
+              currentChunkIndex = data.index;
               break;
-            default:
-              console.warn('Unknown message type:', data.type);
+
+            case 'chunk-ack':
+              const resolve = this.pendingAcks.get(data.index);
+              if (resolve) {
+                resolve();
+                this.pendingAcks.delete(data.index);
+              }
+              break;
+
+            case 'file-end':
+              try {
+                const filePath = await this.fileManager.completeDownload(peerId);
+                this.emit('file-receive-complete', { peerId, filePath });
+              } catch (error) {
+                console.error('[DEBUG] Error completing download:', error);
+              }
+              break;
           }
         } else {
-          // Handle binary data
+          // Binary chunk received
           try {
             const chunk = Buffer.from(event.data);
-            const progress = await this.fileManager.writeChunk(peerId, chunk);
+            const progress = await this.fileManager.writeChunk(peerId, chunk, currentChunkIndex);
+            
+            // Send acknowledgment
+            dataChannel.send(JSON.stringify({
+              type: 'chunk-ack',
+              index: currentChunkIndex
+            }));
+
             this.emit('transfer-progress', {
               peerId,
               ...progress
             });
           } catch (error) {
-            console.error('Error handling file chunk:', error);
-            this.emit('error', {
-              type: 'file-chunk-error',
-              peerId,
-              error: error.message
-            });
-            // Clean up the failed download
+            console.error('[DEBUG] Error processing chunk:', error);
             await this.fileManager.cleanupDownload(peerId);
-            // Notify the sender
-            dataChannel.send(JSON.stringify({
-              type: 'file-error',
-              error: 'Failed to process file chunk'
-            }));
           }
         }
       } catch (error) {
-        console.error('Error in message handler:', error);
-        this.emit('error', {
-          type: 'message-error',
-          peerId,
-          error: error.message
-        });
+        console.error('[DEBUG] Error in message handler:', error);
       }
+    };
+
+    dataChannel.onopen = () => {
+      console.log('[DEBUG] Data channel opened with peer:', peerId);
+      this.emit('channel-open', peerId);
+    };
+
+    dataChannel.onclose = () => {
+      console.log('[DEBUG] Data channel closed with peer:', peerId);
+      this.emit('channel-close', peerId);
+      this.cleanupPeer(peerId);
     };
   }
 
   async sendFile(peerId, filePath) {
+    console.log('[DEBUG] Starting file send:', { peerId, filePath });
     const dataChannel = this.dataChannels.get(peerId);
     if (!dataChannel || dataChannel.readyState !== 'open') {
       throw new Error('Data channel not ready');
@@ -231,29 +250,68 @@ class P2PManager extends EventEmitter {
     const fileStats = await fs.stat(filePath);
     const fileName = path.basename(filePath);
     const fileSize = fileStats.size;
-    const chunkSize = 16 * 1024; // 16KB chunks
 
-    // Send file metadata
+    // Send file metadata and wait for ready signal
+    console.log('[DEBUG] Sending file metadata');
     dataChannel.send(JSON.stringify({
       type: 'file-start',
       name: fileName,
-      size: fileSize
+      size: fileSize,
+      chunkSize: this.chunkSize
     }));
 
+    // Wait for ready signal
+    await new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        reject(new Error('Timeout waiting for receiver ready signal'));
+      }, 10000);
+
+      const handler = (event) => {
+        if (typeof event.data === 'string') {
+          try {
+            const data = JSON.parse(event.data);
+            if (data.type === 'file-ready') {
+              clearTimeout(timeout);
+              dataChannel.removeEventListener('message', handler);
+              resolve();
+            }
+          } catch (error) {
+            console.error('[DEBUG] Error parsing ready signal:', error);
+          }
+        }
+      };
+      dataChannel.addEventListener('message', handler);
+    });
+
     try {
-      const fileStream = fs.createReadStream(filePath, { highWaterMark: chunkSize });
+      console.log('[DEBUG] Starting chunk transfer');
+      const fileStream = fs.createReadStream(filePath, { highWaterMark: this.chunkSize });
       let bytesSent = 0;
+      let chunkIndex = 0;
+      let inFlightChunks = 0;
 
       for await (const chunk of fileStream) {
-        // Flow control: wait if the buffer is getting full
-        while (dataChannel.bufferedAmount > dataChannel.bufferedAmountLowThreshold) {
-          await new Promise(resolve => setTimeout(resolve, 100));
+        // Wait if we have too many unacknowledged chunks
+        while (inFlightChunks >= this.windowSize) {
+          await new Promise(resolve => {
+            this.pendingAcks.set(chunkIndex, resolve);
+          });
+          inFlightChunks--;
         }
 
-        // Send the chunk as ArrayBuffer
+        // Send chunk metadata
+        dataChannel.send(JSON.stringify({
+          type: 'chunk-start',
+          index: chunkIndex,
+          size: chunk.length
+        }));
+
+        // Send chunk data
         dataChannel.send(chunk);
+        inFlightChunks++;
+        chunkIndex++;
         bytesSent += chunk.length;
-        
+
         this.emit('transfer-progress', {
           peerId,
           progress: (bytesSent / fileSize) * 100,
@@ -262,10 +320,20 @@ class P2PManager extends EventEmitter {
         });
       }
 
-      dataChannel.send(JSON.stringify({ type: 'file-end' }));
+      // Wait for remaining acknowledgments
+      while (inFlightChunks > 0) {
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+
+      console.log('[DEBUG] File transfer complete, sending end signal');
+      dataChannel.send(JSON.stringify({ 
+        type: 'file-end',
+        totalChunks: chunkIndex
+      }));
+
       this.emit('transfer-complete', { peerId, fileName });
     } catch (error) {
-      console.error('Error sending file:', error);
+      console.error('[DEBUG] Error in sendFile:', error);
       this.emit('error', error);
       throw error;
     }
@@ -275,47 +343,50 @@ class P2PManager extends EventEmitter {
     try {
       const data = JSON.parse(message);
       switch (data.type) {
-        case 'file-start':
-          console.log('Starting file receive:', data);
-          this.fileManager.startFileDownload(peerId, data.name, data.size)
-            .then(downloadPath => {
-              console.log('File will be saved to:', downloadPath);
-              this.emit('file-receive-start', {
+        case "file-start":
+          console.log("Starting file receive:", data);
+          this.fileManager
+            .startFileDownload(peerId, data.name, data.size)
+            .then((downloadPath) => {
+              console.log("File will be saved to:", downloadPath);
+              this.emit("file-receive-start", {
                 peerId,
                 fileName: data.name,
                 fileSize: data.size,
-                downloadPath
+                downloadPath,
               });
             })
-            .catch(error => {
-              console.error('Failed to start file download:', error);
+            .catch((error) => {
+              console.error("Failed to start file download:", error);
             });
           break;
-        case 'file-end':
-          console.log('Completing file receive');
-          this.fileManager.completeDownload(peerId)
-            .then(filePath => {
-              this.emit('file-receive-complete', { peerId, filePath });
+        case "file-end":
+          console.log("Completing file receive");
+          this.fileManager
+            .completeDownload(peerId)
+            .then((filePath) => {
+              this.emit("file-receive-complete", { peerId, filePath });
             })
-            .catch(error => {
-              console.error('Failed to complete file download:', error);
+            .catch((error) => {
+              console.error("Failed to complete file download:", error);
             });
           break;
         default:
-          console.warn('Unknown message type:', data.type);
+          console.warn("Unknown message type:", data.type);
       }
     } catch (error) {
       // Handle binary data (file chunks)
-      console.log('Received file chunk from peer:', peerId);
-      this.fileManager.writeChunk(peerId, message)
-        .then(progress => {
-          this.emit('transfer-progress', {
+      console.log("Received file chunk from peer:", peerId);
+      this.fileManager
+        .writeChunk(peerId, message)
+        .then((progress) => {
+          this.emit("transfer-progress", {
             peerId,
-            ...progress
+            ...progress,
           });
         })
-        .catch(error => {
-          console.error('Failed to write file chunk:', error);
+        .catch((error) => {
+          console.error("Failed to write file chunk:", error);
         });
     }
   }
@@ -324,10 +395,10 @@ class P2PManager extends EventEmitter {
     const pc = await this.createPeerConnection(peerId, true);
     const offer = await pc.createOffer();
     await pc.setLocalDescription(offer);
-    
-    this.socket.emit('signal', {
+
+    this.socket.emit("signal", {
       targetPeerId: peerId,
-      signal: offer
+      signal: offer,
     });
   }
 
@@ -347,12 +418,12 @@ class P2PManager extends EventEmitter {
       clearInterval(this.discoveryInterval);
       this.discoveryInterval = null;
     }
-    
+
     if (this.socket) {
       this.socket.disconnect();
       this.socket = null;
     }
-    
+
     // Cleanup all peer connections
     for (const peerId of this.peerConnections.keys()) {
       this.cleanupPeer(peerId);
@@ -369,10 +440,10 @@ class P2PManager extends EventEmitter {
         return;
       } catch (error) {
         if (i === retries - 1) throw error;
-        await new Promise(resolve => setTimeout(resolve, 1000));
+        await new Promise((resolve) => setTimeout(resolve, 1000));
       }
     }
   }
 }
 
-module.exports = P2PManager; 
+module.exports = P2PManager;

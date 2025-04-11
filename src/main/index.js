@@ -67,8 +67,23 @@ const initializeApp = async () => {
     });
 
     p2pManager.on('error', (error) => {
-      console.error('P2P error:', error);
-      mainWindow?.webContents.send('transfer-error', error.message);
+      console.error('[DEBUG] P2P error:', error);
+      try {
+        mainWindow?.webContents.send('transfer-error', 
+          typeof error === 'object' ? error : { message: String(error) });
+      } catch (sendError) {
+        console.error('[DEBUG] Error forwarding error event:', sendError);
+      }
+    });
+
+    p2pManager.on("file-receive-start", (data) => {
+      console.log('[DEBUG] Forwarding file-receive-start event to renderer:', data);
+      try {
+        mainWindow?.webContents.send("file-receive-start", data);
+        console.log('[DEBUG] Successfully forwarded file-receive-start event');
+      } catch (error) {
+        console.error('[DEBUG] Error forwarding file-receive-start event:', error);
+      }
     });
   } catch (error) {
     console.error("Failed to initialize app:", error);

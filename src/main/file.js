@@ -1,4 +1,5 @@
-const fs = require('fs-extra');
+const fs = require('fs/promises');
+const fsSync = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 
@@ -6,14 +7,16 @@ class FileManager {
   constructor(downloadDir) {
     this.downloadDir = downloadDir;
     this.activeDownloads = new Map();
+    console.log('[DEBUG] FileManager constructed with:', downloadDir);
   }
 
   async ensureDownloadDir() {
     try {
-      await fs.ensureDir(this.downloadDir);
+      await fs.mkdir(this.downloadDir, { recursive: true });
+      console.log('[DEBUG] Download directory ensured:', this.downloadDir);
     } catch (error) {
-      console.error('Failed to create download directory:', error);
-      throw new Error('Failed to create download directory: ' + error.message);
+      console.error('[DEBUG] Failed to create download directory:', error);
+      throw error;
     }
   }
 
@@ -32,7 +35,7 @@ class FileManager {
   async calculateFileHash(filePath) {
     return new Promise((resolve, reject) => {
       const hash = crypto.createHash('sha256');
-      const stream = fs.createReadStream(filePath);
+      const stream = fsSync.createReadStream(filePath);
       
       stream.on('error', reject);
       stream.on('data', chunk => hash.update(chunk));
@@ -41,46 +44,57 @@ class FileManager {
   }
 
   async startFileDownload(peerId, fileName, fileSize) {
+    console.log('[DEBUG] Starting file download:', { peerId, fileName, fileSize });
     try {
-      // Ensure the download directory exists first
       await this.ensureDownloadDir();
 
-      // Sanitize the filename to prevent directory traversal
       const safeFileName = path.basename(fileName);
       const downloadPath = path.join(this.downloadDir, safeFileName);
 
-      // If file exists, append a number to make it unique
       let finalPath = downloadPath;
       let counter = 1;
-      while (await fs.pathExists(finalPath)) {
-        const ext = path.extname(downloadPath);
-        const base = path.basename(downloadPath, ext);
-        finalPath = path.join(this.downloadDir, `${base} (${counter})${ext}`);
-        counter++;
+      
+      while (true) {
+        try {
+          await fs.access(finalPath);
+          const ext = path.extname(downloadPath);
+          const base = path.basename(downloadPath, ext);
+          finalPath = path.join(this.downloadDir, `${base} (${counter})${ext}`);
+          counter++;
+        } catch (error) {
+          // File doesn't exist, we can use this path
+          break;
+        }
       }
 
+      console.log('[DEBUG] Creating write stream for:', finalPath);
+      const stream = fsSync.createWriteStream(finalPath);
+      
       const downloadInfo = {
         path: finalPath,
         size: fileSize,
         received: 0,
-        stream: fs.createWriteStream(finalPath)
+        stream,
+        chunks: new Map() // Store chunks that arrive out of order
       };
 
-      // Set up error handler for the stream
-      downloadInfo.stream.on('error', (error) => {
-        console.error('Stream error:', error);
-        this.cleanupDownload(peerId).catch(console.error);
+      stream.on('error', (error) => {
+        console.error('[DEBUG] Stream error:', error);
+        this.cleanupDownload(peerId).catch(err => {
+          console.error('[DEBUG] Cleanup error:', err);
+        });
       });
 
       this.activeDownloads.set(peerId, downloadInfo);
       return finalPath;
     } catch (error) {
-      console.error('Failed to start file download:', error);
-      throw new Error('Failed to start file download: ' + error.message);
+      console.error('[DEBUG] Error in startFileDownload:', error);
+      throw error;
     }
   }
 
-  async writeChunk(peerId, chunk) {
+  async writeChunk(peerId, chunk, chunkIndex) {
+    console.log('[DEBUG] Writing chunk:', { peerId, chunkIndex, size: chunk.length });
     const downloadInfo = this.activeDownloads.get(peerId);
     if (!downloadInfo) {
       throw new Error('No active download for peer');
@@ -88,38 +102,49 @@ class FileManager {
 
     try {
       await new Promise((resolve, reject) => {
-        downloadInfo.stream.write(Buffer.from(chunk), error => {
+        downloadInfo.stream.write(chunk, error => {
           if (error) reject(error);
           else resolve();
         });
       });
 
       downloadInfo.received += chunk.length;
+      console.log('[DEBUG] Chunk written successfully. Total received:', downloadInfo.received);
+
       return {
         progress: (downloadInfo.received / downloadInfo.size) * 100,
         received: downloadInfo.received,
         total: downloadInfo.size
       };
     } catch (error) {
-      console.error('Error writing chunk:', error);
+      console.error('[DEBUG] Error writing chunk:', error);
       throw error;
     }
   }
 
   async completeDownload(peerId) {
+    console.log('[DEBUG] Completing download for peer:', peerId);
     const downloadInfo = this.activeDownloads.get(peerId);
     if (!downloadInfo) {
       throw new Error('No active download for peer');
     }
 
-    await new Promise((resolve, reject) => {
-      downloadInfo.stream.end(() => {
-        resolve();
+    try {
+      await new Promise((resolve, reject) => {
+        downloadInfo.stream.end(err => {
+          if (err) reject(err);
+          else resolve();
+        });
       });
-    });
 
-    this.activeDownloads.delete(peerId);
-    return downloadInfo.path;
+      const finalPath = downloadInfo.path;
+      this.activeDownloads.delete(peerId);
+      console.log('[DEBUG] Download completed:', finalPath);
+      return finalPath;
+    } catch (error) {
+      console.error('[DEBUG] Error completing download:', error);
+      throw error;
+    }
   }
 
   async verifyFile(filePath, expectedHash) {
@@ -130,7 +155,7 @@ class FileManager {
   async cleanupIncompleteDownloads() {
     for (const [peerId, downloadInfo] of this.activeDownloads.entries()) {
       try {
-        await fs.remove(downloadInfo.path);
+        await fs.unlink(downloadInfo.path);
       } catch (error) {
         console.error(`Failed to cleanup download for peer ${peerId}:`, error);
       }
@@ -138,19 +163,22 @@ class FileManager {
     this.activeDownloads.clear();
   }
 
-  // Add a new method to cleanup a specific download
   async cleanupDownload(peerId) {
+    console.log('[DEBUG] Cleaning up download for peer:', peerId);
     const downloadInfo = this.activeDownloads.get(peerId);
     if (downloadInfo) {
       try {
         if (downloadInfo.stream) {
           downloadInfo.stream.end();
         }
-        if (downloadInfo.path && await fs.pathExists(downloadInfo.path)) {
-          await fs.remove(downloadInfo.path);
+        if (downloadInfo.path) {
+          try {
+            await fs.unlink(downloadInfo.path);
+            console.log('[DEBUG] Cleaned up incomplete file:', downloadInfo.path);
+          } catch (error) {
+            console.error('[DEBUG] Error deleting incomplete file:', error);
+          }
         }
-      } catch (error) {
-        console.error(`Failed to cleanup download for peer ${peerId}:`, error);
       } finally {
         this.activeDownloads.delete(peerId);
       }
