@@ -168,13 +168,16 @@ class P2PManager extends EventEmitter {
                 currentFileInfo = {
                   name: data.name,
                   size: data.size,
-                  path: downloadPath
+                  path: downloadPath,
+                  mime: data.mime,
+                  lastModified: data.lastModified
                 };
                 receivedChunks = [];
                 this.emit('file-receive-start', {
                   peerId,
                   fileName: data.name,
                   fileSize: data.size,
+                  mime: data.mime
                 });
                 dataChannel.send(JSON.stringify({ type: 'file-ready' }));
               } catch (error) {
@@ -197,7 +200,13 @@ class P2PManager extends EventEmitter {
                 await fs.writeFile(currentFileInfo.path, fileBuffer);
                 
                 const filePath = await this.fileManager.completeDownload(peerId);
-                this.emit('file-receive-complete', { peerId, filePath });
+                this.emit('file-receive-complete', { 
+                  peerId, 
+                  filePath,
+                  fileName: currentFileInfo.name,
+                  fileSize: currentFileInfo.size,
+                  mime: currentFileInfo.mime
+                });
                 
                 // Reset state
                 currentFileInfo = null;
@@ -223,7 +232,8 @@ class P2PManager extends EventEmitter {
               peerId,
               progress: (totalReceived / currentFileInfo.size) * 100,
               received: totalReceived,
-              total: currentFileInfo.size
+              total: currentFileInfo.size,
+              fileName: currentFileInfo.name
             });
           } catch (error) {
             console.error('[DEBUG] Error processing chunk:', error);
@@ -257,13 +267,16 @@ class P2PManager extends EventEmitter {
     const fileStats = await fs.stat(filePath);
     const fileName = path.basename(filePath);
     const fileSize = fileStats.size;
+    const mime = await this.getMimeType(filePath);
 
     // Send file metadata and wait for ready signal
     console.log('[DEBUG] Sending file metadata');
     dataChannel.send(JSON.stringify({
       type: 'file-start',
       name: fileName,
-      size: fileSize
+      size: fileSize,
+      mime: mime,
+      lastModified: fileStats.mtimeMs
     }));
 
     // Wait for ready signal
@@ -307,7 +320,8 @@ class P2PManager extends EventEmitter {
           peerId,
           progress: (bytesSent / fileSize) * 100,
           bytesSent,
-          totalBytes: fileSize
+          totalBytes: fileSize,
+          fileName: fileName
         });
 
         // Small delay to prevent overwhelming the receiver
@@ -320,12 +334,22 @@ class P2PManager extends EventEmitter {
         type: 'file-end'
       }));
 
-      this.emit('transfer-complete', { peerId, fileName });
+      this.emit('transfer-complete', { 
+        peerId, 
+        fileName,
+        fileSize,
+        mime
+      });
     } catch (error) {
       console.error('[DEBUG] Error in sendFile:', error);
       this.emit('error', error);
       throw error;
     }
+  }
+
+  async getMimeType(filePath) {
+    const mime = require('mime-types');
+    return mime.lookup(filePath) || 'application/octet-stream';
   }
 
   handleMessage(peerId, message) {

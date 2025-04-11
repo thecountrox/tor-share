@@ -111,10 +111,16 @@ app.on("window-all-closed", async () => {
     if (signalingServer) {
       await signalingServer.stop();
     }
-    await stopTor();
     await fs.remove(torDataDir);
     app.quit();
   }
+});
+
+app.on("will-quit", () => {
+  if (p2pManager) {
+    p2pManager.disconnect();
+  }
+  app.quit();
 });
 
 app.on("quit", () => {
