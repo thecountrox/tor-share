@@ -572,6 +572,56 @@ class P2PManager extends EventEmitter {
       this.emit('error', new Error('Socket not connected'));
     }
   }
+
+  async connectPeer(peerId) {
+    console.log('[DEBUG] Connecting to peer:', peerId);
+    try {
+      // Check if we already have a connection
+      if (this.peerConnections.has(peerId)) {
+        const pc = this.peerConnections.get(peerId);
+        if (pc.connectionState === 'connected' || pc.connectionState === 'connecting') {
+          console.log('[DEBUG] Already connected or connecting to peer:', peerId);
+          return;
+        }
+        // Clean up existing connection if it's in a failed state
+        this.cleanupPeer(peerId);
+      }
+
+      // Create new peer connection
+      await this.initiateConnection(peerId);
+      
+      // Wait for connection to be established
+      await new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => {
+          reject(new Error('Connection timeout'));
+        }, 30000); // 30 second timeout
+
+        const checkConnection = () => {
+          const pc = this.peerConnections.get(peerId);
+          if (pc && (pc.connectionState === 'connected' || pc.connectionState === 'connecting')) {
+            clearTimeout(timeout);
+            resolve();
+          }
+        };
+
+        // Check immediately
+        checkConnection();
+        
+        // Set up periodic check
+        const interval = setInterval(checkConnection, 100);
+        
+        // Clean up interval when done
+        timeout.unref();
+        interval.unref();
+      });
+
+      console.log('[DEBUG] Successfully connected to peer:', peerId);
+    } catch (error) {
+      console.error('[DEBUG] Failed to connect to peer:', error);
+      this.cleanupPeer(peerId);
+      throw error;
+    }
+  }
 }
 
 module.exports = P2PManager;
