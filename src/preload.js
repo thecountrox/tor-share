@@ -14,41 +14,43 @@ contextBridge.exposeInMainWorld("electron", {
     return () => ipcRenderer.removeAllListeners("tor-status");
   },
 
-  // Peer connections
-  connectPeer: (peerId) => ipcRenderer.invoke("connect-peer", peerId),
-
   // File operations
   selectFile: () => ipcRenderer.invoke("select-file"),
-  sendFile: (peerId, filePath) => ipcRenderer.invoke("send-file", peerId, filePath),
+  sendFile: (clientId, filePath) => ipcRenderer.invoke("send-file", clientId, filePath),
+  respondToTransfer: (clientId, accept) => ipcRenderer.invoke("respond-to-transfer", clientId, accept),
 
   // Event listeners
   onSelfId: (callback) => {
-    ipcRenderer.on("peer-ready", (_, peerId) => callback(peerId));
+    ipcRenderer.on("peer-ready", (_, clientId) => callback(clientId));
     return () => ipcRenderer.removeAllListeners("peer-ready");
   },
-  onPeerList: (callback) => {
-    ipcRenderer.on("peer-list", (_, peers) => callback(peers));
+  onClientList: (callback) => {
+    ipcRenderer.on("peer-list", (_, clients) => callback(clients));
     return () => ipcRenderer.removeAllListeners("peer-list");
   },
-  onPeerConnected: (callback) => {
-    ipcRenderer.on("channel-open", (_, peerId) => callback(peerId));
-    return () => ipcRenderer.removeAllListeners("channel-open");
+  onTransferRequest: (callback) => {
+    ipcRenderer.on("transfer-request", (_, data) => callback(data));
+    return () => ipcRenderer.removeAllListeners("transfer-request");
+  },
+  onTransferAccepted: (callback) => {
+    ipcRenderer.on("transfer-accepted", (_, clientId) => callback(clientId));
+    return () => ipcRenderer.removeAllListeners("transfer-accepted");
+  },
+  onTransferRejected: (callback) => {
+    ipcRenderer.on("transfer-rejected", (_, clientId) => callback(clientId));
+    return () => ipcRenderer.removeAllListeners("transfer-rejected");
   },
   onTransferProgress: (callback) => {
     ipcRenderer.on("transfer-progress", (_, data) => callback(data));
     return () => ipcRenderer.removeAllListeners("transfer-progress");
   },
-  onTransferComplete: (callback) => {
-    ipcRenderer.on("transfer-complete", (_, data) => callback(data));
-    return () => ipcRenderer.removeAllListeners("transfer-complete");
+  onClientDisconnected: (callback) => {
+    ipcRenderer.on("peer-disconnected", (_, clientId) => callback(clientId));
+    return () => ipcRenderer.removeAllListeners("peer-disconnected");
   },
-  refreshPeers: () => ipcRenderer.invoke("refresh-peers"),
-  onFileReceiveStart: (callback) => {
-    ipcRenderer.on("file-receive-start", (_, data) => callback(data));
-    return () => ipcRenderer.removeAllListeners("file-receive-start");
+  onError: (callback) => {
+    ipcRenderer.on("error", (_, error) => callback(error));
+    return () => ipcRenderer.removeAllListeners("error");
   },
-  onTransferError: (callback) => {
-    ipcRenderer.on("transfer-error", (_, error) => callback(error));
-    return () => ipcRenderer.removeAllListeners("transfer-error");
-  }
+  refreshClients: () => ipcRenderer.invoke("refresh-peers")
 });

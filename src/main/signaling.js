@@ -18,7 +18,7 @@ class SignalingServer {
       },
     });
 
-    this.peers = new Map();
+    this.clients = new Map();
     this.onionAddress = null;
     this.hiddenServiceDir = null;
   }
@@ -35,45 +35,66 @@ class SignalingServer {
       HiddenServiceDir ${this.hiddenServiceDir}
       HiddenServicePort 80 127.0.0.1:3000
       `,
-      { flag: "a" }, // Append to existing torrc
+      { flag: "a" },
     );
 
     // Setup socket.io event handlers
     this.io.on("connection", (socket) => {
       console.log("Client connected:", socket.id);
 
-      // Generate a unique peer ID
-      const peerId = crypto.randomBytes(16).toString("hex");
-      this.peers.set(peerId, socket);
+      // Generate a unique client ID
+      const clientId = crypto.randomBytes(16).toString("hex");
+      this.clients.set(clientId, socket);
 
-      // Send the peer ID to the client
-      socket.emit("peer-id", peerId);
+      // Send the client ID
+      socket.emit("client-id", clientId);
 
-      // Handle WebRTC signaling
-      socket.on("signal", ({ targetPeerId, signal }) => {
-        const targetPeer = this.peers.get(targetPeerId);
-        if (targetPeer) {
-          targetPeer.emit("signal", {
-            fromPeerId: peerId,
-            signal,
+      // Handle file transfer requests
+      socket.on("transfer-request", ({ targetClientId, metadata }) => {
+        const targetClient = this.clients.get(targetClientId);
+        if (targetClient) {
+          targetClient.emit("transfer-request", {
+            fromClientId: clientId,
+            metadata
           });
         }
       });
 
-      // Handle peer discovery
+      // Handle transfer response
+      socket.on("transfer-response", ({ targetClientId, accept }) => {
+        const targetClient = this.clients.get(targetClientId);
+        if (targetClient) {
+          targetClient.emit("transfer-response", {
+            fromClientId: clientId,
+            accept
+          });
+        }
+      });
+
+      // Handle encrypted file chunks
+      socket.on("file-chunk", ({ targetClientId, chunk }) => {
+        const targetClient = this.clients.get(targetClientId);
+        if (targetClient) {
+          targetClient.emit("file-chunk", {
+            fromClientId: clientId,
+            chunk
+          });
+        }
+      });
+
+      // Handle client discovery
       socket.on("discover", () => {
-        const peerList = Array.from(this.peers.keys()).filter(
-          (id) => id !== peerId,
+        const clientList = Array.from(this.clients.keys()).filter(
+          (id) => id !== clientId
         );
-        socket.emit("peers", peerList);
+        socket.emit("clients", clientList);
       });
 
       // Handle disconnection
       socket.on("disconnect", () => {
         console.log("Client disconnected:", socket.id);
-        this.peers.delete(peerId);
-        // Notify other peers about the disconnection
-        this.io.emit("peer-disconnected", peerId);
+        this.clients.delete(clientId);
+        this.io.emit("client-disconnected", clientId);
       });
     });
 
@@ -88,7 +109,6 @@ class SignalingServer {
   }
 
   async watchHiddenService() {
-    // Watch for the hidden service hostname file
     const hostnameFile = path.join(this.hiddenServiceDir, "hostname");
     let retries = 0;
     const maxRetries = 30;
