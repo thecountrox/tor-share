@@ -1,5 +1,6 @@
 const { app, BrowserWindow, ipcMain, dialog } = require("electron");
 const path = require("path");
+const os = require("os");
 const { startTor, stopTor, getTorStatus } = require("./tor");
 const SignalingClient = require("./signaling-client");
 const ClientManager = require("./client-manager");
@@ -54,8 +55,8 @@ const createWindow = () => {
 
 const initializeApp = async () => {
   try {
-    // Create temp directory for Tor data
-    torDataDir = await fs.mkdtemp("/tmp/tor-");
+    // Create temp directory for Tor data using platform-independent approach
+    torDataDir = await fs.mkdtemp(path.join(os.tmpdir(), "tor-"));
 
     // Start Tor
     await startTor(torDataDir);
