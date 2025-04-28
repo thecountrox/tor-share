@@ -67,7 +67,10 @@ class ClientManager extends EventEmitter {
   }
 
   async sendFile(targetClientId, filePath) {
+    console.log(`[CLIENT-MANAGER] Attempting to send file ${filePath} to client ${targetClientId}`);
+    
     if (!this.connectedClients.has(targetClientId)) {
+      console.error(`[CLIENT-MANAGER] Client ${targetClientId} not connected, cannot send file`);
       throw new Error("Target client not connected");
     }
 
@@ -78,29 +81,44 @@ class ClientManager extends EventEmitter {
       lastModified: stats.mtimeMs
     };
 
+    console.log(`[CLIENT-MANAGER] Sending transfer request for file ${metadata.name} (${metadata.size} bytes) to ${targetClientId}`);
+    
     // Send transfer request
     this.signalingClient.sendTransferRequest(targetClientId, metadata);
 
     // Wait for response
     return new Promise((resolve, reject) => {
+      console.log(`[CLIENT-MANAGER] Waiting for response from ${targetClientId}`);
+      
       const timeout = setTimeout(() => {
+        console.error(`[CLIENT-MANAGER] Transfer request to ${targetClientId} timed out`);
         reject(new Error("Transfer request timed out"));
       }, 30000);
 
       const responseHandler = (data) => {
+        console.log(`[CLIENT-MANAGER] Received transfer response from ${data.fromClientId}:`, data);
+        
         if (data.fromClientId === targetClientId) {
           clearTimeout(timeout);
           this.signalingClient.removeListener("transfer-response", responseHandler);
 
           if (!data.accept) {
+            console.error(`[CLIENT-MANAGER] Transfer rejected by recipient ${targetClientId}`);
             reject(new Error("Transfer rejected by recipient"));
             return;
           }
 
           // Start sending file
+          console.log(`[CLIENT-MANAGER] Transfer accepted by ${targetClientId}, starting file transfer`);
           this.sendFileChunks(targetClientId, filePath)
-            .then(() => resolve())
-            .catch(error => reject(error));
+            .then(() => {
+              console.log(`[CLIENT-MANAGER] File transfer to ${targetClientId} completed successfully`);
+              resolve();
+            })
+            .catch(error => {
+              console.error(`[CLIENT-MANAGER] Error during file transfer to ${targetClientId}:`, error);
+              reject(error);
+            });
         }
       };
 
@@ -109,22 +127,36 @@ class ClientManager extends EventEmitter {
   }
 
   async sendFileChunks(targetClientId, filePath) {
+    console.log(`[CLIENT-MANAGER] Starting to send file chunks for ${filePath} to ${targetClientId}`);
+    
     const fileStream = fs.createReadStream(filePath, { highWaterMark: 16 * 1024 }); // 16KB chunks
     let bytesSent = 0;
+    let chunkCount = 0;
     const fileStats = await fs.stat(filePath);
 
-    for await (const chunk of fileStream) {
-      this.signalingClient.sendFileChunk(targetClientId, chunk);
-      bytesSent += chunk.length;
-      this.emit("transfer-progress", {
-        targetClientId,
-        progress: (bytesSent / fileStats.size) * 100,
-        bytesSent,
-        totalBytes: fileStats.size
-      });
-    }
+    try {
+      for await (const chunk of fileStream) {
+        console.log(`[CLIENT-MANAGER] Sending chunk ${++chunkCount} (${chunk.length} bytes) to ${targetClientId}`);
+        this.signalingClient.sendFileChunk(targetClientId, chunk);
+        bytesSent += chunk.length;
+        
+        const progress = (bytesSent / fileStats.size) * 100;
+        console.log(`[CLIENT-MANAGER] Transfer progress: ${progress.toFixed(2)}% (${bytesSent}/${fileStats.size} bytes)`);
+        
+        this.emit("transfer-progress", {
+          targetClientId,
+          progress,
+          bytesSent,
+          totalBytes: fileStats.size
+        });
+      }
 
-    this.emit("transfer-complete", { targetClientId });
+      console.log(`[CLIENT-MANAGER] All chunks sent to ${targetClientId}, total: ${bytesSent} bytes in ${chunkCount} chunks`);
+      this.emit("transfer-complete", { targetClientId });
+    } catch (error) {
+      console.error(`[CLIENT-MANAGER] Error sending file chunks to ${targetClientId}:`, error);
+      throw error;
+    }
   }
 
   acceptTransfer(fromClientId, fileName) {

@@ -189,19 +189,28 @@ class SignalingClient extends EventEmitter {
 
   sendTransferRequest(targetClientId, metadata) {
     if (this.socket) {
+      console.log(`[CLIENT ${this.clientId}] Sending transfer request to ${targetClientId}:`, metadata);
       this.socket.emit('transfer-request', { targetClientId, metadata });
+    } else {
+      console.error(`[CLIENT ${this.clientId}] Cannot send transfer request: Socket not connected`);
     }
   }
 
   sendTransferResponse(targetClientId, accept) {
     if (this.socket) {
+      console.log(`[CLIENT ${this.clientId}] Sending transfer response to ${targetClientId}: ${accept ? 'ACCEPT' : 'REJECT'}`);
       this.socket.emit('transfer-response', { targetClientId, accept });
+    } else {
+      console.error(`[CLIENT ${this.clientId}] Cannot send transfer response: Socket not connected`);
     }
   }
 
   sendFileChunk(targetClientId, chunk) {
     if (this.socket) {
+      console.log(`[CLIENT ${this.clientId}] Sending file chunk to ${targetClientId}: ${chunk.length} bytes`);
       this.socket.emit('file-chunk', { targetClientId, chunk });
+    } else {
+      console.error(`[CLIENT ${this.clientId}] Cannot send file chunk: Socket not connected`);
     }
   }
 

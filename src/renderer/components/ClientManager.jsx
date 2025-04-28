@@ -81,18 +81,59 @@ const ClientManager = () => {
 
   const handleSendFile = async (targetClientId) => {
     try {
+      console.log(`[RENDERER] Selecting file to send to ${targetClientId}`);
       const file = await window.electron.selectFile();
+      
       if (file) {
-        await window.electron.sendFile(targetClientId, file.path);
-        setTransfers((prev) => new Map(prev).set(targetClientId, {
-          fileName: file.name,
-          fileSize: file.size,
-          status: 'sending',
-          progress: 0
-        }));
+        console.log(`[RENDERER] Selected file: ${file.name}, path: ${file.path}, size: ${file.size} bytes`);
+        
+        setTransfers((prev) => {
+          const newTransfers = new Map(prev);
+          newTransfers.set(targetClientId, {
+            fileName: file.name,
+            fileSize: file.size,
+            status: 'sending',
+            progress: 0
+          });
+          return newTransfers;
+        });
+        
+        console.log(`[RENDERER] Initiating file transfer to client ${targetClientId}`);
+        const result = await window.electron.sendFile(targetClientId, file.path);
+        console.log(`[RENDERER] Send file result:`, result);
+        
+        if (!result.success) {
+          console.error(`[RENDERER] Error sending file:`, result.error);
+          setError(result.error || 'Failed to send file');
+          
+          // Update transfer status to error
+          setTransfers((prev) => {
+            const newTransfers = new Map(prev);
+            const transfer = newTransfers.get(targetClientId);
+            if (transfer) {
+              transfer.status = 'error';
+              transfer.error = result.error;
+            }
+            return newTransfers;
+          });
+        }
+      } else {
+        console.log(`[RENDERER] No file selected, cancelling send operation`);
       }
     } catch (err) {
+      console.error(`[RENDERER] Error in handleSendFile:`, err);
       setError(err.message);
+      
+      // Update transfer status to error
+      setTransfers((prev) => {
+        const newTransfers = new Map(prev);
+        const transfer = newTransfers.get(targetClientId);
+        if (transfer) {
+          transfer.status = 'error';
+          transfer.error = err.message;
+        }
+        return newTransfers;
+      });
     }
   };
 

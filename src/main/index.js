@@ -293,13 +293,38 @@ ipcMain.handle("get-connected-clients", () => {
 });
 
 ipcMain.handle("send-file", async (event, { targetClientId, filePath }) => {
+  console.log(`[IPC] Request to send file ${filePath} to client ${targetClientId}`);
+  
   try {
     if (!clientManager) {
+      console.error("[IPC] Cannot send file: Client manager not initialized");
       throw new Error("Not connected to signaling server");
     }
+    
+    if (!targetClientId) {
+      console.error("[IPC] Cannot send file: Target client ID is missing");
+      throw new Error("Target client ID is required");
+    }
+    
+    if (!filePath || typeof filePath !== 'string') {
+      console.error("[IPC] Cannot send file: Invalid file path", filePath);
+      throw new Error("Valid file path is required");
+    }
+    
+    console.log(`[IPC] Checking if file exists: ${filePath}`);
+    try {
+      await fs.access(filePath, fs.constants.R_OK);
+    } catch (error) {
+      console.error(`[IPC] File access error:`, error);
+      throw new Error(`Cannot access file: ${error.message}`);
+    }
+    
+    console.log(`[IPC] Starting file transfer to ${targetClientId}`);
     await clientManager.sendFile(targetClientId, filePath);
+    console.log(`[IPC] File transfer initiated successfully`);
     return { success: true };
   } catch (error) {
+    console.error(`[IPC] Error sending file:`, error);
     return { success: false, error: error.message };
   }
 });
