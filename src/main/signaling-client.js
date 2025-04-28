@@ -117,22 +117,32 @@ class SignalingClient extends EventEmitter {
         });
 
         this.socket.on("transfer-request", (data) => {
+          console.log(`[CLIENT ${this.clientId}] Received transfer request:`, data);
           this.emit("transfer-request", data);
         });
 
         this.socket.on("transfer-response", (data) => {
+          console.log(`[CLIENT ${this.clientId}] Received transfer response:`, data);
+          // First emit the raw event for any listeners
+          this.emit("transfer-response", data);
+          
+          // Then also emit the result-specific events for backward compatibility
           if (data.accept) {
+            console.log(`[CLIENT ${this.clientId}] Transfer was accepted by ${data.fromClientId}`);
             this.emit("transfer-accepted", data.fromClientId);
           } else {
+            console.log(`[CLIENT ${this.clientId}] Transfer was rejected by ${data.fromClientId}`);
             this.emit("transfer-rejected", data.fromClientId);
           }
         });
 
         this.socket.on("file-chunk", (data) => {
+          console.log(`[CLIENT ${this.clientId}] Received file chunk from ${data.fromClientId}, size: ${data.chunk ? data.chunk.length : 'unknown'} bytes`);
           this.emit("file-chunk", data);
         });
 
         this.socket.on("client-disconnected", (clientId) => {
+          console.log(`[CLIENT ${this.clientId}] Client disconnected: ${clientId}`);
           this.emit("client-disconnected", clientId);
         });
 
@@ -225,14 +235,12 @@ class SignalingClient extends EventEmitter {
 
   sendTransferResponse(targetClientId, accept) {
     if (this.socket) {
-      console.log(
-        `[CLIENT ${this.clientId}] Sending transfer response to ${targetClientId}: ${accept ? "ACCEPT" : "REJECT"}`,
-      );
-      this.socket.emit("transfer-response", { targetClientId, accept });
+      console.log(`[CLIENT ${this.clientId}] Sending transfer response to ${targetClientId}: ${accept ? 'ACCEPT' : 'REJECT'}`);
+      const response = { targetClientId, accept };
+      console.log(`[CLIENT ${this.clientId}] Response payload:`, response);
+      this.socket.emit('transfer-response', response);
     } else {
-      console.error(
-        `[CLIENT ${this.clientId}] Cannot send transfer response: Socket not connected`,
-      );
+      console.error(`[CLIENT ${this.clientId}] Cannot send transfer response: Socket not connected`);
     }
   }
 

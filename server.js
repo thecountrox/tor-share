@@ -92,12 +92,22 @@ io.on('connection', (socket) => {
     
     const targetClient = clients.get(targetClientId);
     if (targetClient) {
+      console.log(`Forwarding transfer response to target client ${targetClientId}`);
       targetClient.emit('transfer-response', {
         fromClientId: clientId,
         accept
       });
+      
+      // Log a confirmation that the message was sent
+      console.log(`Transfer response from ${clientId} to ${targetClientId} forwarded successfully`);
     } else {
-      console.log(`Target client ${targetClientId} not found`);
+      console.log(`Target client ${targetClientId} not found, response could not be delivered`);
+      
+      // Send a notification back to the sender that the target is unavailable
+      socket.emit('error', {
+        message: `Target client ${targetClientId} is not available`,
+        code: 'TARGET_UNAVAILABLE'
+      });
     }
   });
 
@@ -115,6 +125,15 @@ io.on('connection', (socket) => {
   // Handle disconnection
   socket.on('disconnect', () => {
     console.log(`Client disconnected: ${clientId}`);
+    
+    // Check if this client had any pending transfers and notify the other parties
+    for (const [cid, client] of clients.entries()) {
+      if (cid !== clientId) {
+        console.log(`Notifying client ${cid} about disconnection of ${clientId}`);
+        client.emit('client-disconnected', clientId);
+      }
+    }
+    
     clients.delete(clientId);
     
     // Log updated client count

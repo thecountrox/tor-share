@@ -90,15 +90,15 @@ class ClientManager extends EventEmitter {
     return new Promise((resolve, reject) => {
       console.log(`[CLIENT-MANAGER] Waiting for response from ${targetClientId}`);
       
-      const timeout = setTimeout(() => {
-        console.error(`[CLIENT-MANAGER] Transfer request to ${targetClientId} timed out`);
-        reject(new Error("Transfer request timed out"));
-      }, 30000);
-
+      // Track if we've received a response
+      let responseReceived = false;
+      
+      // Create explicit one-time handler for transfer-response event
       const responseHandler = (data) => {
         console.log(`[CLIENT-MANAGER] Received transfer response from ${data.fromClientId}:`, data);
         
         if (data.fromClientId === targetClientId) {
+          responseReceived = true;
           clearTimeout(timeout);
           this.signalingClient.removeListener("transfer-response", responseHandler);
 
@@ -119,10 +119,35 @@ class ClientManager extends EventEmitter {
               console.error(`[CLIENT-MANAGER] Error during file transfer to ${targetClientId}:`, error);
               reject(error);
             });
+        } else {
+          console.log(`[CLIENT-MANAGER] Received response from ${data.fromClientId} but waiting for ${targetClientId}`);
         }
       };
 
+      // Create a separate listener for all transfer responses to debug
+      const debugAllResponsesHandler = (data) => {
+        console.log(`[CLIENT-MANAGER-DEBUG] Transfer response detected:`, data);
+      };
+      
+      this.signalingClient.on("transfer-response", debugAllResponsesHandler);
       this.signalingClient.on("transfer-response", responseHandler);
+      
+      // Set up timeout
+      const timeout = setTimeout(() => {
+        this.signalingClient.removeListener("transfer-response", responseHandler);
+        this.signalingClient.removeListener("transfer-response", debugAllResponsesHandler);
+        
+        console.error(`[CLIENT-MANAGER] Transfer request to ${targetClientId} timed out. Response received: ${responseReceived}`);
+        
+        // Try to directly check if client is still connected
+        if (this.connectedClients.has(targetClientId)) {
+          console.log(`[CLIENT-MANAGER] Client ${targetClientId} is still in the connected clients list`);
+        } else {
+          console.log(`[CLIENT-MANAGER] Client ${targetClientId} is no longer in the connected clients list`);
+        }
+        
+        reject(new Error("Transfer request timed out"));
+      }, 30000);
     });
   }
 
@@ -160,10 +185,12 @@ class ClientManager extends EventEmitter {
   }
 
   acceptTransfer(fromClientId, fileName) {
+    console.log(`[CLIENT-MANAGER] Accepting transfer from ${fromClientId} for file ${fileName}`);
     this.signalingClient.sendTransferResponse(fromClientId, true);
   }
 
   rejectTransfer(fromClientId) {
+    console.log(`[CLIENT-MANAGER] Rejecting transfer from ${fromClientId}`);
     this.signalingClient.sendTransferResponse(fromClientId, false);
   }
 }

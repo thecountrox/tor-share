@@ -25,6 +25,9 @@ let signalingClient = null;
 let clientManager = null;
 let signalingServerUrl = store.get("signalingServerUrl");
 
+// Add a tracking map for client IDs to prevent duplicates
+const connectedClientIds = new Set();
+
 const createWindow = () => {
   mainWindow = new BrowserWindow({
     width: 1200,
@@ -131,26 +134,38 @@ const connectToSignalingServer = async (url) => {
 
     // Set up event handlers
     signalingClient.on("client-ready", (clientId) => {
+      console.log(`[MAIN] Client ready with ID: ${clientId}`);
       mainWindow?.webContents.send("client-ready", clientId);
     });
 
     signalingClient.on("client-list", (clients) => {
-      mainWindow?.webContents.send("client-list", clients);
+      console.log(`[MAIN] Received client list with ${clients.length} clients`);
+      
+      // Filter out our own ID if it's in the list
+      const filteredClients = clients.filter(id => id !== signalingClient.clientId);
+      console.log(`[MAIN] Filtered client list: ${filteredClients.join(', ') || 'none'}`);
+      
+      mainWindow?.webContents.send("client-list", filteredClients);
     });
 
     signalingClient.on("transfer-request", (data) => {
+      console.log(`[MAIN] Received transfer request from ${data.fromClientId} for file ${data.fileName}`);
       mainWindow?.webContents.send("transfer-request", data);
     });
 
     signalingClient.on("transfer-accepted", (clientId) => {
+      console.log(`[MAIN] Transfer accepted by ${clientId}`);
       mainWindow?.webContents.send("transfer-accepted", clientId);
     });
 
     signalingClient.on("transfer-rejected", (clientId) => {
+      console.log(`[MAIN] Transfer rejected by ${clientId}`);
       mainWindow?.webContents.send("transfer-rejected", clientId);
     });
 
     signalingClient.on("client-disconnected", (clientId) => {
+      console.log(`[MAIN] Client disconnected: ${clientId}`);
+      connectedClientIds.delete(clientId);
       mainWindow?.webContents.send("client-disconnected", clientId);
     });
 
@@ -169,18 +184,26 @@ const connectToSignalingServer = async (url) => {
 
     // Set up client manager event handlers
     clientManager.on("ready", (clientId) => {
+      console.log(`[MAIN] Client manager ready with client ID: ${clientId}`);
       mainWindow?.webContents.send("client-ready", clientId);
     });
 
     clientManager.on("clients-updated", (clients) => {
-      console.log(
-        `Main process: Forwarding clients-updated event with ${clients.length} clients to renderer`,
-      );
-      console.log(
-        "Client list details:",
-        clients.map((client) => client.id).join(", ") || "No clients",
-      );
-      mainWindow?.webContents.send("clients-updated", clients);
+      // Filter out duplicate clients by ID
+      const uniqueClients = [];
+      const seenIds = new Set();
+      
+      for (const client of clients) {
+        if (!seenIds.has(client.id) && client.id !== signalingClient.clientId) {
+          seenIds.add(client.id);
+          uniqueClients.push(client);
+        }
+      }
+      
+      console.log(`[MAIN] Forwarding clients-updated event with ${uniqueClients.length} unique clients to renderer`);
+      console.log('Client list details:', uniqueClients.map(client => client.id).join(', ') || 'No clients');
+      
+      mainWindow?.webContents.send("clients-updated", uniqueClients);
     });
 
     clientManager.on("client-disconnected", (clientId) => {

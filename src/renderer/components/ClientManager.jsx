@@ -31,48 +31,82 @@ const ClientManager = () => {
       }),
       window.electron.onTransferRequest((data) => {
         const { fromClientId, fileName, fileSize } = data;
-        setTransfers((prev) => new Map(prev).set(fromClientId, {
-          fileName,
-          fileSize,
-          status: 'pending',
-          progress: 0
-        }));
+        console.log(`Renderer: Received transfer request from ${fromClientId} for file ${fileName} (${fileSize} bytes)`);
+        
+        setTransfers((prev) => {
+          const newTransfers = new Map(prev);
+          newTransfers.set(fromClientId, {
+            fileName,
+            fileSize,
+            status: 'pending',
+            progress: 0
+          });
+          return newTransfers;
+        });
       }),
       window.electron.onTransferProgress((data) => {
-        const { targetClientId, progress } = data;
+        const { targetClientId, progress, bytesSent, totalBytes } = data;
+        console.log(`Renderer: Transfer progress update for ${targetClientId}: ${progress.toFixed(2)}% (${bytesSent}/${totalBytes} bytes)`);
+        
         setTransfers((prev) => {
           const newTransfers = new Map(prev);
           const transfer = newTransfers.get(targetClientId);
           if (transfer) {
             transfer.progress = progress;
             transfer.status = 'transferring';
+            transfer.bytesSent = bytesSent;
+            transfer.totalBytes = totalBytes;
           }
           return newTransfers;
         });
       }),
       window.electron.onTransferComplete((data) => {
         const { targetClientId } = data;
+        console.log(`Renderer: Transfer complete for ${targetClientId}`);
+        
         setTransfers((prev) => {
           const newTransfers = new Map(prev);
           const transfer = newTransfers.get(targetClientId);
           if (transfer) {
             transfer.status = 'completed';
             transfer.progress = 100;
+            
+            // Auto-clear completed transfers after 5 seconds
+            setTimeout(() => {
+              setTransfers(current => {
+                const updated = new Map(current);
+                updated.delete(targetClientId);
+                return updated;
+              });
+            }, 5000);
           }
           return newTransfers;
         });
       }),
       window.electron.onTransferError((data) => {
         const { clientId, error } = data;
+        console.error(`Renderer: Transfer error for ${clientId}: ${error}`);
+        
         setTransfers((prev) => {
           const newTransfers = new Map(prev);
           const transfer = newTransfers.get(clientId);
           if (transfer) {
             transfer.status = 'error';
             transfer.error = error;
+            
+            // Auto-clear errored transfers after 10 seconds
+            setTimeout(() => {
+              setTransfers(current => {
+                const updated = new Map(current);
+                updated.delete(clientId);
+                return updated;
+              });
+            }, 10000);
           }
           return newTransfers;
         });
+        
+        setError(`Transfer error: ${error}`);
       })
     ];
 
@@ -175,6 +209,14 @@ const ClientManager = () => {
     }
   };
 
+  // Add a utility function to format file sizes
+  const formatFileSize = (bytes) => {
+    if (bytes < 1024) return bytes + ' B';
+    else if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(2) + ' KB';
+    else if (bytes < 1024 * 1024 * 1024) return (bytes / (1024 * 1024)).toFixed(2) + ' MB';
+    else return (bytes / (1024 * 1024 * 1024)).toFixed(2) + ' GB';
+  };
+
   return (
     <Paper sx={{ p: 2 }}>
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
@@ -218,10 +260,14 @@ const ClientManager = () => {
                   <Box sx={{ width: '100%', mt: 1 }}>
                     <Typography variant="body2" color="text.secondary">
                       {transfers.get(client.id).fileName} - {transfers.get(client.id).status}
+                      {transfers.get(client.id).bytesSent && transfers.get(client.id).totalBytes && (
+                        ` (${formatFileSize(transfers.get(client.id).bytesSent)} / ${formatFileSize(transfers.get(client.id).totalBytes)})`
+                      )}
                     </Typography>
                     <LinearProgress
-                      variant="determinate"
+                      variant={transfers.get(client.id).progress > 0 ? "determinate" : "indeterminate"}
                       value={transfers.get(client.id).progress}
+                      color={transfers.get(client.id).status === 'error' ? 'error' : 'primary'}
                       sx={{ mt: 1 }}
                     />
                     {transfers.get(client.id).status === 'pending' && (
@@ -241,6 +287,11 @@ const ClientManager = () => {
                           Reject
                         </Button>
                       </Box>
+                    )}
+                    {transfers.get(client.id).status === 'error' && (
+                      <Typography variant="body2" color="error" sx={{ mt: 1 }}>
+                        {transfers.get(client.id).error}
+                      </Typography>
                     )}
                   </Box>
                 )
