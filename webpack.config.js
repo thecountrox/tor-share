@@ -4,7 +4,7 @@ module.exports = {
   entry: './src/renderer/index.jsx',
   output: {
     filename: 'renderer.js',
-    path: path.resolve(__dirname, 'dist'),
+    path: path.resolve(__dirname, 'src/renderer/dist'),
   },
   module: {
     rules: [
@@ -17,6 +17,10 @@ module.exports = {
             presets: ['@babel/preset-env', '@babel/preset-react'],
           },
         },
+      },
+      {
+        test: /\.css$/,
+        use: ['style-loader', 'css-loader'],
       },
     ],
   },

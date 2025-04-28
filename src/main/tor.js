@@ -21,11 +21,20 @@ const startTor = async (torDataDir) => {
 
   // Create torrc file
   const torrcPath = path.join(torDataDir, 'torrc');
+  const hiddenServiceDir = path.join(torDataDir, 'hidden_service');
+  await fs.ensureDir(hiddenServiceDir);
+  
+  // Set proper permissions for the hidden service directory
+  await fs.chmod(hiddenServiceDir, 0o700);
+  
   await fs.writeFile(torrcPath, `
-SocksPort 9055
+SocksPort 9050
 ControlPort 9056
 DataDirectory ${torDataDir}
 HashedControlPassword ${CONTROL_PASSWORD_HASH}
+HiddenServiceDir ${hiddenServiceDir}
+HiddenServicePort 80 127.0.0.1:3000
+AvoidDiskWrites 1
 `);
 
   // Find Tor binary

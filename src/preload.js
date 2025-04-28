@@ -5,35 +5,47 @@
 const { contextBridge, ipcRenderer } = require("electron");
 
 contextBridge.exposeInMainWorld("electron", {
-  // Tor control
-  startTor: () => ipcRenderer.invoke("start-tor"),
-  stopTor: () => ipcRenderer.invoke("stop-tor"),
-  statusTor: () => ipcRenderer.invoke("status-tor"),
-  onTorStatus: (callback) => {
-    ipcRenderer.on("tor-status", (_, status) => callback(status));
-    return () => ipcRenderer.removeAllListeners("tor-status");
-  },
-
-  // Peer connections
-  connectPeer: (peerId) => ipcRenderer.invoke("connect-peer", peerId),
-  refreshPeers: () => ipcRenderer.invoke("refresh-peers"),
+  // Client operations
+  getClientId: () => ipcRenderer.invoke("get-client-id"),
+  getConnectedClients: () => ipcRenderer.invoke("get-connected-clients"),
+  sendFile: (targetClientId, filePath) => 
+    ipcRenderer.invoke("send-file", { targetClientId, filePath }),
+  acceptTransfer: (fromClientId, fileName) => 
+    ipcRenderer.invoke("accept-transfer", { fromClientId, fileName }),
+  rejectTransfer: (fromClientId) => 
+    ipcRenderer.invoke("reject-transfer", { fromClientId }),
 
   // File operations
   selectFile: () => ipcRenderer.invoke("select-file"),
-  sendFile: (peerId, filePath) => ipcRenderer.invoke("send-file", peerId, filePath),
+
+  // Signaling server configuration
+  setSignalingServer: (url) => ipcRenderer.invoke("set-signaling-server", url),
+  getSignalingServer: () => ipcRenderer.invoke("get-signaling-server"),
 
   // Event listeners
-  onSelfId: (callback) => {
-    ipcRenderer.on("peer-ready", (_, peerId) => callback(peerId));
-    return () => ipcRenderer.removeAllListeners("peer-ready");
+  onClientReady: (callback) => {
+    ipcRenderer.on("client-ready", (_, clientId) => callback(clientId));
+    return () => ipcRenderer.removeAllListeners("client-ready");
   },
-  onPeerList: (callback) => {
-    ipcRenderer.on("peer-list", (_, peers) => callback(peers));
-    return () => ipcRenderer.removeAllListeners("peer-list");
+  onClientsUpdated: (callback) => {
+    ipcRenderer.on("clients-updated", (_, clients) => callback(clients));
+    return () => ipcRenderer.removeAllListeners("clients-updated");
   },
-  onPeerConnected: (callback) => {
-    ipcRenderer.on("channel-open", (_, peerId) => callback(peerId));
-    return () => ipcRenderer.removeAllListeners("channel-open");
+  onClientDisconnected: (callback) => {
+    ipcRenderer.on("client-disconnected", (_, clientId) => callback(clientId));
+    return () => ipcRenderer.removeAllListeners("client-disconnected");
+  },
+  onTransferRequest: (callback) => {
+    ipcRenderer.on("transfer-request", (_, data) => callback(data));
+    return () => ipcRenderer.removeAllListeners("transfer-request");
+  },
+  onTransferAccepted: (callback) => {
+    ipcRenderer.on("transfer-accepted", (_, clientId) => callback(clientId));
+    return () => ipcRenderer.removeAllListeners("transfer-accepted");
+  },
+  onTransferRejected: (callback) => {
+    ipcRenderer.on("transfer-rejected", (_, clientId) => callback(clientId));
+    return () => ipcRenderer.removeAllListeners("transfer-rejected");
   },
   onTransferProgress: (callback) => {
     ipcRenderer.on("transfer-progress", (_, data) => callback(data));
@@ -43,20 +55,12 @@ contextBridge.exposeInMainWorld("electron", {
     ipcRenderer.on("transfer-complete", (_, data) => callback(data));
     return () => ipcRenderer.removeAllListeners("transfer-complete");
   },
-  onFileReceiveStart: (callback) => {
-    ipcRenderer.on("file-receive-start", (_, data) => callback(data));
-    return () => ipcRenderer.removeAllListeners("file-receive-start");
-  },
-  onFileReceiveComplete: (callback) => {
-    ipcRenderer.on("file-receive-complete", (_, data) => callback(data));
-    return () => ipcRenderer.removeAllListeners("file-receive-complete");
-  },
   onTransferError: (callback) => {
-    ipcRenderer.on("transfer-error", (_, error) => callback(error));
+    ipcRenderer.on("transfer-error", (_, data) => callback(data));
     return () => ipcRenderer.removeAllListeners("transfer-error");
   },
-  onError: (callback) => {
-    ipcRenderer.on("error", (_, error) => callback(error));
-    return () => ipcRenderer.removeAllListeners("error");
+  onDisconnected: (callback) => {
+    ipcRenderer.on("disconnected", () => callback());
+    return () => ipcRenderer.removeAllListeners("disconnected");
   }
 });
