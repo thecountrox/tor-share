@@ -44,6 +44,25 @@ const ClientManager = () => {
           return newTransfers;
         });
       }),
+      window.electron.onTransferStatusUpdate((data) => {
+        const { clientId, status, fileName, filePath, fileSize } = data;
+        console.log(`Renderer: Transfer status update for ${clientId}: ${status}`);
+        
+        setTransfers((prev) => {
+          const newTransfers = new Map(prev);
+          const transfer = newTransfers.get(clientId) || {};
+          
+          newTransfers.set(clientId, {
+            ...transfer,
+            fileName: fileName || transfer.fileName,
+            fileSize: fileSize || transfer.fileSize,
+            filePath: filePath || transfer.filePath,
+            status: status || transfer.status
+          });
+          
+          return newTransfers;
+        });
+      }),
       window.electron.onTransferProgress((data) => {
         const { targetClientId, progress, bytesSent, totalBytes } = data;
         console.log(`Renderer: Transfer progress update for ${targetClientId}: ${progress.toFixed(2)}% (${bytesSent}/${totalBytes} bytes)`);

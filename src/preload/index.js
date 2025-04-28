@@ -30,6 +30,11 @@ contextBridge.exposeInMainWorld('electron', {
     ipcRenderer.on('transfer-request', handler);
     return () => ipcRenderer.removeListener('transfer-request', handler);
   },
+  onTransferStatusUpdate: (callback) => {
+    const handler = (_, data) => callback(data);
+    ipcRenderer.on('transfer-status-update', handler);
+    return () => ipcRenderer.removeListener('transfer-status-update', handler);
+  },
   onTransferProgress: (callback) => {
     const handler = (_, data) => callback(data);
     ipcRenderer.on('transfer-progress', handler);

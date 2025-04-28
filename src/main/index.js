@@ -28,6 +28,9 @@ let signalingServerUrl = store.get("signalingServerUrl");
 // Add a tracking map for client IDs to prevent duplicates
 const connectedClientIds = new Set();
 
+// Add a map to track file transfers
+const activeTransfers = new Map();
+
 const createWindow = () => {
   mainWindow = new BrowserWindow({
     width: 1200,
@@ -150,7 +153,12 @@ const connectToSignalingServer = async (url) => {
 
     signalingClient.on("transfer-request", (data) => {
       console.log(`[MAIN] Received transfer request from ${data.fromClientId} for file ${data.fileName}`);
+      
+      // Forward to renderer for display
       mainWindow?.webContents.send("transfer-request", data);
+      
+      // Also handle it directly to show save dialog
+      handleTransferRequest(data);
     });
 
     signalingClient.on("transfer-accepted", (clientId) => {
@@ -172,6 +180,14 @@ const connectToSignalingServer = async (url) => {
     signalingClient.on("error", (error) => {
       console.error("[DEBUG] Signaling error:", error);
       mainWindow?.webContents.send("error", error.message);
+    });
+
+    // Add event handler for file chunks
+    signalingClient.on("file-chunk", (data) => {
+      console.log(`[MAIN] Received file chunk from ${data.fromClientId}, size: ${data.chunk ? data.chunk.length : 'unknown'} bytes`);
+      
+      // Process the chunk
+      saveFileChunk(data.fromClientId, data.chunk);
     });
 
     // Connect to server
@@ -372,26 +388,87 @@ ipcMain.handle("send-file", async (event, { targetClientId, filePath }) => {
   }
 });
 
-ipcMain.handle("accept-transfer", async (event, { fromClientId, fileName }) => {
+// Add a function to handle incoming transfer requests
+async function handleTransferRequest(data) {
+  const { fromClientId, fileName, fileSize } = data;
+  console.log(`[MAIN] Handling transfer request from ${fromClientId} for ${fileName} (${fileSize} bytes)`);
+  
   try {
-    if (!clientManager) {
-      throw new Error("Not connected to signaling server");
+    // Show save dialog to let user choose where to save the file
+    const result = await dialog.showSaveDialog(mainWindow, {
+      title: 'Save File',
+      defaultPath: path.join(app.getPath('downloads'), fileName),
+      buttonLabel: 'Save',
+      properties: ['createDirectory', 'showOverwriteConfirmation']
+    });
+    
+    if (result.canceled) {
+      console.log(`[MAIN] Save dialog canceled by user`);
+      if (clientManager) {
+        clientManager.rejectTransfer(fromClientId);
+      }
+      return;
     }
-    await clientManager.acceptTransfer(fromClientId, fileName);
-    return { success: true };
+    
+    const filePath = result.filePath;
+    console.log(`[MAIN] User selected save location: ${filePath}`);
+    
+    // Create a transfer record
+    const transfer = {
+      filePath,
+      fileName,
+      bytesReceived: 0,
+      fileSize,
+      fromClientId
+    };
+    
+    // Clean up any existing file at the path
+    try {
+      await fs.unlink(filePath);
+    } catch (error) {
+      // File doesn't exist, ignore
+    }
+    
+    // Create an empty file
+    await fs.writeFile(filePath, Buffer.alloc(0));
+    
+    // Store the transfer information
+    activeTransfers.set(fromClientId, transfer);
+    
+    // Accept the transfer
+    console.log(`[MAIN] Accepting file transfer from ${fromClientId}`);
+    if (clientManager) {
+      await clientManager.acceptTransfer(fromClientId, fileName);
+      
+      // Update UI with status
+      mainWindow?.webContents.send("transfer-status-update", {
+        clientId: fromClientId,
+        status: 'receiving',
+        fileName,
+        filePath,
+        fileSize
+      });
+    }
   } catch (error) {
-    return { success: false, error: error.message };
+    console.error(`[MAIN] Error handling transfer request:`, error);
+    mainWindow?.webContents.send("error", `Failed to handle transfer: ${error.message}`);
+    
+    if (clientManager) {
+      clientManager.rejectTransfer(fromClientId);
+    }
   }
-});
+}
 
-ipcMain.handle("reject-transfer", (event, { fromClientId }) => {
+// Update the acceptTransfer IPC handler:
+ipcMain.handle("accept-transfer", async (event, { fromClientId, fileName }) => {
+  console.log(`[IPC] Accept transfer request received for ${fileName} from ${fromClientId}`);
+  
   try {
-    if (!clientManager) {
-      throw new Error("Not connected to signaling server");
-    }
-    clientManager.rejectTransfer(fromClientId);
+    // Since we already handled this in handleTransferRequest, 
+    // we just need to update the UI to avoid duplicated handling
     return { success: true };
   } catch (error) {
+    console.error(`[IPC] Error accepting transfer:`, error);
     return { success: false, error: error.message };
   }
 });
@@ -440,4 +517,69 @@ app.on("before-quit", () => {
     signalingClient.disconnect();
   }
   stopTor();
+});
+
+// Add a function to save file chunks
+async function saveFileChunk(fromClientId, chunk) {
+  if (!activeTransfers.has(fromClientId)) {
+    console.error(`[FILE] No active transfer for client ${fromClientId}`);
+    return;
+  }
+  
+  const transfer = activeTransfers.get(fromClientId);
+  
+  try {
+    // Append the chunk to the file
+    await fs.appendFile(transfer.filePath, chunk);
+    
+    // Update progress
+    transfer.bytesReceived += chunk.length;
+    const progress = (transfer.bytesReceived / transfer.fileSize) * 100;
+    
+    console.log(`[FILE] Chunk saved for ${fromClientId}, progress: ${progress.toFixed(2)}% (${transfer.bytesReceived}/${transfer.fileSize} bytes)`);
+    
+    // Emit progress event to renderer
+    mainWindow?.webContents.send("transfer-progress", {
+      targetClientId: fromClientId,
+      progress,
+      bytesSent: transfer.bytesReceived,
+      totalBytes: transfer.fileSize
+    });
+    
+    // Check if transfer is complete
+    if (transfer.bytesReceived >= transfer.fileSize) {
+      console.log(`[FILE] Transfer complete for ${fromClientId}, file saved to ${transfer.filePath}`);
+      
+      // Emit completion event to renderer
+      mainWindow?.webContents.send("transfer-complete", {
+        targetClientId: fromClientId
+      });
+      
+      // Clean up transfer
+      activeTransfers.delete(fromClientId);
+    }
+  } catch (error) {
+    console.error(`[FILE] Error saving chunk:`, error);
+    
+    // Emit error event to renderer
+    mainWindow?.webContents.send("transfer-error", {
+      clientId: fromClientId,
+      error: error.message
+    });
+    
+    // Clean up transfer
+    activeTransfers.delete(fromClientId);
+  }
+}
+
+ipcMain.handle("reject-transfer", (event, { fromClientId }) => {
+  try {
+    if (!clientManager) {
+      throw new Error("Not connected to signaling server");
+    }
+    clientManager.rejectTransfer(fromClientId);
+    return { success: true };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
 });
