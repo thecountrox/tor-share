@@ -4,13 +4,14 @@ const { startTor, stopTor, getTorStatus } = require("./tor");
 const SignalingClient = require("./signaling-client");
 const ClientManager = require("./client-manager");
 const fs = require("fs-extra");
-const Store = require('electron-store').default;
+const Store = require("electron-store").default;
 
 // Initialize electron store for persistence
 const store = new Store({
   defaults: {
-    signalingServerUrl: 'http://hh2pu2zm7szr3htz65z5wpnbqvt6km2havy5uruhlr4gpozsfiyh2myd.onion'  // Working signaling server URL
-  }
+    signalingServerUrl:
+      "http://hh2pu2zm7szr3htz65z5wpnbqvt6km2havy5uruhlr4gpozsfiyh2myd.onion", // Working signaling server URL
+  },
 });
 
 // Handle creating/removing shortcuts on Windows when installing/uninstalling.
@@ -22,7 +23,7 @@ let mainWindow;
 let torDataDir;
 let signalingClient = null;
 let clientManager = null;
-let signalingServerUrl = store.get('signalingServerUrl');
+let signalingServerUrl = store.get("signalingServerUrl");
 
 const createWindow = () => {
   mainWindow = new BrowserWindow({
@@ -31,8 +32,8 @@ const createWindow = () => {
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
-      preload: path.join(__dirname, "../preload/index.js")
-    }
+      preload: path.join(__dirname, "../preload/index.js"),
+    },
   });
 
   // In development, load from localhost
@@ -62,48 +63,57 @@ const initializeApp = async () => {
       mainWindow?.webContents.send("signaling-server-url", signalingServerUrl);
       await connectToSignalingServer(signalingServerUrl);
     }
-
   } catch (error) {
     console.error("Failed to initialize app:", error);
     mainWindow?.webContents.send("tor-status", "error");
-    mainWindow?.webContents.send("error", `Initialization error: ${error.message}`);
+    mainWindow?.webContents.send(
+      "error",
+      `Initialization error: ${error.message}`,
+    );
   }
 };
 
 // Function to verify Tor is actually running and available
 const verifyTorAvailability = async (retries = 3, delay = 2000) => {
-  const net = require('net');
-  
+  const net = require("net");
+
   for (let attempt = 0; attempt < retries; attempt++) {
     try {
       await new Promise((resolve, reject) => {
-        const socket = net.connect({
-          host: '127.0.0.1',
-          port: 9050
-        }, () => {
-          console.log('Tor SOCKS proxy is available');
-          socket.end();
-          resolve();
-        });
-        
-        socket.on('error', (err) => {
-          console.warn(`Tor SOCKS proxy not available (attempt ${attempt + 1}/${retries}): ${err.message}`);
+        const socket = net.connect(
+          {
+            host: "127.0.0.1",
+            port: 9055,
+          },
+          () => {
+            console.log("Tor SOCKS proxy is available");
+            socket.end();
+            resolve();
+          },
+        );
+
+        socket.on("error", (err) => {
+          console.warn(
+            `Tor SOCKS proxy not available (attempt ${attempt + 1}/${retries}): ${err.message}`,
+          );
           socket.destroy();
           reject(err);
         });
       });
-      
+
       // If we get here, connection was successful
       return true;
     } catch (error) {
       // If we've tried the max number of times, throw error
       if (attempt >= retries - 1) {
-        throw new Error(`Could not connect to Tor SOCKS proxy after ${retries} attempts: ${error.message}`);
+        throw new Error(
+          `Could not connect to Tor SOCKS proxy after ${retries} attempts: ${error.message}`,
+        );
       }
-      
+
       // Otherwise wait and try again
       console.log(`Waiting ${delay}ms before retrying Tor connection...`);
-      await new Promise(resolve => setTimeout(resolve, delay));
+      await new Promise((resolve) => setTimeout(resolve, delay));
     }
   }
 };
@@ -163,8 +173,13 @@ const connectToSignalingServer = async (url) => {
     });
 
     clientManager.on("clients-updated", (clients) => {
-      console.log(`Main process: Forwarding clients-updated event with ${clients.length} clients to renderer`);
-      console.log('Client list details:', clients.map(client => client.id).join(', ') || 'No clients');
+      console.log(
+        `Main process: Forwarding clients-updated event with ${clients.length} clients to renderer`,
+      );
+      console.log(
+        "Client list details:",
+        clients.map((client) => client.id).join(", ") || "No clients",
+      );
       mainWindow?.webContents.send("clients-updated", clients);
     });
 
@@ -269,15 +284,18 @@ ipcMain.handle("refresh-clients", async () => {
     console.error("Cannot refresh clients: Signaling client not initialized");
     throw new Error("Signaling client not connected");
   }
-  
+
   console.log("Manually refreshing client list");
-  
+
   // Trigger discovery immediately
   signalingClient.discover();
-  
+
   // Return the current list (though the updated list will come via the clients-updated event)
   const clients = clientManager?.getConnectedClients() || [];
-  console.log(`Refresh returning ${clients.length} current clients:`, clients.map(c => c.id).join(', ') || 'none');
+  console.log(
+    `Refresh returning ${clients.length} current clients:`,
+    clients.map((c) => c.id).join(", ") || "none",
+  );
   return clients;
 });
 
@@ -293,24 +311,26 @@ ipcMain.handle("get-connected-clients", () => {
 });
 
 ipcMain.handle("send-file", async (event, { targetClientId, filePath }) => {
-  console.log(`[IPC] Request to send file ${filePath} to client ${targetClientId}`);
-  
+  console.log(
+    `[IPC] Request to send file ${filePath} to client ${targetClientId}`,
+  );
+
   try {
     if (!clientManager) {
       console.error("[IPC] Cannot send file: Client manager not initialized");
       throw new Error("Not connected to signaling server");
     }
-    
+
     if (!targetClientId) {
       console.error("[IPC] Cannot send file: Target client ID is missing");
       throw new Error("Target client ID is required");
     }
-    
-    if (!filePath || typeof filePath !== 'string') {
+
+    if (!filePath || typeof filePath !== "string") {
       console.error("[IPC] Cannot send file: Invalid file path", filePath);
       throw new Error("Valid file path is required");
     }
-    
+
     console.log(`[IPC] Checking if file exists: ${filePath}`);
     try {
       await fs.access(filePath, fs.constants.R_OK);
@@ -318,7 +338,7 @@ ipcMain.handle("send-file", async (event, { targetClientId, filePath }) => {
       console.error(`[IPC] File access error:`, error);
       throw new Error(`Cannot access file: ${error.message}`);
     }
-    
+
     console.log(`[IPC] Starting file transfer to ${targetClientId}`);
     await clientManager.sendFile(targetClientId, filePath);
     console.log(`[IPC] File transfer initiated successfully`);
@@ -360,21 +380,24 @@ ipcMain.handle("get-signaling-server", () => {
 
 ipcMain.handle("set-signaling-server", async (event, url) => {
   try {
-    if (!url || typeof url !== 'string') {
+    if (!url || typeof url !== "string") {
       throw new Error("Invalid server URL");
     }
-    
+
     // Validate URL format
-    if (!url.endsWith('.onion')) {
+    if (!url.endsWith(".onion")) {
       throw new Error("Server URL must be a .onion address");
     }
 
     // Add protocol if missing
-    const fullUrl = url.startsWith('http://') || url.startsWith('https://') ? url : `http://${url}`;
-    
+    const fullUrl =
+      url.startsWith("http://") || url.startsWith("https://")
+        ? url
+        : `http://${url}`;
+
     signalingServerUrl = fullUrl;
-    store.set('signalingServerUrl', fullUrl);
-    
+    store.set("signalingServerUrl", fullUrl);
+
     // Try to connect and return the result
     const success = await connectToSignalingServer(fullUrl);
     if (!success) {

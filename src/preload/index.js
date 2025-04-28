@@ -18,11 +18,11 @@ contextBridge.exposeInMainWorld('electron', {
 
   // File transfer
   sendFile: (targetClientId, filePath) => 
-    ipcRenderer.invoke('send-file', targetClientId, filePath),
+    ipcRenderer.invoke('send-file', { targetClientId, filePath }),
   acceptTransfer: (fromClientId, fileName) =>
-    ipcRenderer.invoke('accept-transfer', fromClientId, fileName),
+    ipcRenderer.invoke('accept-transfer', { fromClientId, fileName }),
   rejectTransfer: (fromClientId) =>
-    ipcRenderer.invoke('reject-transfer', fromClientId),
+    ipcRenderer.invoke('reject-transfer', { fromClientId }),
 
   // Transfer events
   onTransferRequest: (callback) => {
